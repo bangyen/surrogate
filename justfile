@@ -51,3 +51,7 @@ check: fmt-check lint test
 # run and verify everything
 all: check
     @echo "All checks completed!"
+
+# check environment dependencies
+doctor:
+    {{RUN}} doctor

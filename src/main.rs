@@ -56,6 +56,8 @@ enum Commands {
         #[command(subcommand)]
         action: SyzygyAction,
     },
+    /// Check environment for dependencies
+    Doctor,
 }
 
 #[derive(Subcommand)]
@@ -216,6 +218,18 @@ fn main() -> Result<()> {
                 )?;
             }
         },
+        Commands::Doctor => {
+            println!("Checking environment dependencies...");
+            // We use a default path or the environment variable
+            let stockfish_path = std::env::var("STOCKFISH_PATH").unwrap_or_else(|_| "stockfish".to_string());
+            match ExplainableEngine::new(&stockfish_path) {
+                Ok(_) => println!("✅ Stockfish found and responding at '{}'.", stockfish_path),
+                Err(e) => {
+                    println!("❌ Stockfish error: {}", e);
+                    println!("   Please ensure Stockfish is in your PATH or set the 'STOCKFISH_PATH' environment variable.");
+                }
+            }
+        }
     }
 
     Ok(())

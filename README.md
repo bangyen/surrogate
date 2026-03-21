@@ -32,16 +32,16 @@ just build
 **CLI Tools:**
 ```bash
 # Run feature explainability audit
-just run audit --positions 100
+just audit --positions 100
 
 # Play interactive chess with explanations
-just run play --strength intermediate
+just play
 ```
 
 **Web Interface:**
 ```bash
 # Launch the Axum-based web dashboard
-just run web
+just web
 # Then open http://localhost:5000
 ```
 
