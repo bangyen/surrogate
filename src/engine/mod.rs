@@ -1,3 +1,8 @@
+pub mod search;
+pub mod eval;
+pub mod see;
+pub mod zobrist;
+
 use anyhow::{anyhow, Result};
 use shakmaty::{fen::Fen, Chess, Move, Position};
 use std::io::{BufRead, BufReader, Write};

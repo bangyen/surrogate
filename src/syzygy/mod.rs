@@ -1,3 +1,5 @@
+pub mod utils;
+
 use shakmaty::Chess;
 use shakmaty_syzygy::Tablebase;
 

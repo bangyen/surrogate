@@ -1,11 +1,12 @@
 pub mod engine;
-pub mod eval;
 pub mod features;
 pub mod ml;
 pub mod pawn_cache;
-pub mod search;
-pub mod see;
-pub mod syzygy;
-pub mod syzygy_utils;
 pub mod web_server;
-pub mod zobrist;
+
+pub use engine::search;
+pub use engine::eval;
+pub use engine::see;
+pub use engine::zobrist;
+pub use syzygy::utils as syzygy_utils;
+pub mod syzygy;
