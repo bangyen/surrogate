@@ -1,5 +1,5 @@
-pub mod search;
 pub mod eval;
+pub mod search;
 pub mod see;
 pub mod zobrist;
 

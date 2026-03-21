@@ -221,7 +221,8 @@ fn main() -> Result<()> {
         Commands::Doctor => {
             println!("Checking environment dependencies...");
             // We use a default path or the environment variable
-            let stockfish_path = std::env::var("STOCKFISH_PATH").unwrap_or_else(|_| "stockfish".to_string());
+            let stockfish_path =
+                std::env::var("STOCKFISH_PATH").unwrap_or_else(|_| "stockfish".to_string());
             match ExplainableEngine::new(&stockfish_path) {
                 Ok(_) => println!("✅ Stockfish found and responding at '{}'.", stockfish_path),
                 Err(e) => {

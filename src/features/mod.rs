@@ -1,9 +1,9 @@
+pub mod king_safety;
 pub mod material;
 pub mod mobility;
-pub mod king_safety;
 pub mod pawn_structure;
-pub mod tactical;
 pub mod positional;
+pub mod tactical;
 
 use shakmaty::{Chess, Position};
 use std::collections::BTreeMap;

@@ -277,7 +277,9 @@ impl SurrogateExplainer {
                 .feature_templates
                 .get(&name)
                 .cloned()
-                .unwrap_or_else(|| format!("{} ({:+.1} cp)", self.get_feature_label(&name), cp_value));
+                .unwrap_or_else(|| {
+                    format!("{} ({:+.1} cp)", self.get_feature_label(&name), cp_value)
+                });
             let explanation = template.replace("{:+.0}", &format!("{:+.0}", cp_value));
             reasons.push((name, cp_value, explanation));
         }

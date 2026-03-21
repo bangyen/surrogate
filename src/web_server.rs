@@ -272,7 +272,8 @@ async fn engine_move_handler(
 
     let uci_move: shakmaty::uci::UciMove = mv_uci.parse().unwrap();
     let m = uci_move.to_move(&s.board).unwrap();
-    let explanation = generate_explanation(&s, m).unwrap_or_else(|| "No explanation available".to_string());
+    let explanation =
+        generate_explanation(&s, m).unwrap_or_else(|| "No explanation available".to_string());
 
     let feats = extract_features(&s.board);
 
@@ -286,7 +287,7 @@ async fn engine_move_handler(
 
 async fn undo_move_handler(State(state): State<SharedState>) -> Response {
     let mut s = state.write().unwrap();
-    
+
     // Undo Turn: Pop twice if possible (Engine move + Player move)
     let mut undone = false;
     for _ in 0..2 {

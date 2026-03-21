@@ -1,6 +1,6 @@
+use crate::eval::piece_value;
 use shakmaty::{Bitboard, Chess, Color, Position, Role};
 use std::collections::BTreeMap;
-use crate::eval::piece_value;
 
 pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp: Color) {
     let board = pos.board();
@@ -51,24 +51,40 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
         let knights = board.by_role(Role::Knight) & board.by_color(side);
         for sq in knights {
             let rank: shakmaty::Rank = sq.rank();
-            let rel_rank = if side == Color::White { rank as usize } else { 7 - rank as usize };
-            if !(3..=5).contains(&rel_rank) { continue; }
+            let rel_rank = if side == Color::White {
+                rank as usize
+            } else {
+                7 - rank as usize
+            };
+            if !(3..=5).contains(&rel_rank) {
+                continue;
+            }
 
             let mut is_supported = false;
             for attacker_sq in board.attacks_to(sq, side, occupied) {
                 if let Some(p) = board.piece_at(attacker_sq) {
-                    if p.role == Role::Pawn { is_supported = true; break; }
+                    if p.role == Role::Pawn {
+                        is_supported = true;
+                        break;
+                    }
                 }
             }
-            if !is_supported { continue; }
+            if !is_supported {
+                continue;
+            }
 
             let mut attacked_by_pawn = false;
             for attacker_sq in board.attacks_to(sq, side.other(), occupied) {
                 if let Some(p) = board.piece_at(attacker_sq) {
-                    if p.role == Role::Pawn { attacked_by_pawn = true; break; }
+                    if p.role == Role::Pawn {
+                        attacked_by_pawn = true;
+                        break;
+                    }
                 }
             }
-            if attacked_by_pawn { continue; }
+            if attacked_by_pawn {
+                continue;
+            }
             count += 1;
         }
         count as f32
@@ -81,8 +97,10 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
         let mut count = 0;
         if let Some(king) = board.king_of(side) {
             let enemy_side = side.other();
-            let snipers = (shakmaty::attacks::rook_attacks(king, Bitboard::EMPTY) & board.rooks_and_queens())
-                | (shakmaty::attacks::bishop_attacks(king, Bitboard::EMPTY) & board.bishops_and_queens());
+            let snipers = (shakmaty::attacks::rook_attacks(king, Bitboard::EMPTY)
+                & board.rooks_and_queens())
+                | (shakmaty::attacks::bishop_attacks(king, Bitboard::EMPTY)
+                    & board.bishops_and_queens());
 
             let mut blockers = Bitboard::EMPTY;
             for sniper in snipers & board.by_color(enemy_side) {
@@ -104,7 +122,9 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
         let them = side.other();
         for sq in board.by_color(them) {
             let victim = board.piece_at(sq).unwrap();
-            if victim.role == Role::King { continue; }
+            if victim.role == Role::King {
+                continue;
+            }
             let attackers = board.attacks_to(sq, side, occupied);
             for a_sq in attackers {
                 if let Some(attacker) = board.piece_at(a_sq) {

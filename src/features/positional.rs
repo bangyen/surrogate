@@ -55,11 +55,19 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
     // Space
     let count_space = |side: Color| {
         let mut controlled = Bitboard::EMPTY;
-        for sq in board.by_color(side) { controlled |= board.attacks_from(sq); }
+        for sq in board.by_color(side) {
+            controlled |= board.attacks_from(sq);
+        }
         let opp_half = if side == Color::White {
-            Bitboard::from_rank(shakmaty::Rank::Fifth) | Bitboard::from_rank(shakmaty::Rank::Sixth) | Bitboard::from_rank(shakmaty::Rank::Seventh) | Bitboard::from_rank(shakmaty::Rank::Eighth)
+            Bitboard::from_rank(shakmaty::Rank::Fifth)
+                | Bitboard::from_rank(shakmaty::Rank::Sixth)
+                | Bitboard::from_rank(shakmaty::Rank::Seventh)
+                | Bitboard::from_rank(shakmaty::Rank::Eighth)
         } else {
-            Bitboard::from_rank(shakmaty::Rank::First) | Bitboard::from_rank(shakmaty::Rank::Second) | Bitboard::from_rank(shakmaty::Rank::Third) | Bitboard::from_rank(shakmaty::Rank::Fourth)
+            Bitboard::from_rank(shakmaty::Rank::First)
+                | Bitboard::from_rank(shakmaty::Rank::Second)
+                | Bitboard::from_rank(shakmaty::Rank::Third)
+                | Bitboard::from_rank(shakmaty::Rank::Fourth)
         };
         (controlled & opp_half).count() as f32
     };
@@ -70,12 +78,16 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
     let king_tropism = |side: Color| {
         let them = side.other();
         let enemy_king = board.king_of(them);
-        if enemy_king.is_none() { return 0.0; }
+        if enemy_king.is_none() {
+            return 0.0;
+        }
         let ksq = enemy_king.unwrap();
         let mut tropism = 0.0;
         for sq in board.by_color(side) {
             if let Some(piece) = board.piece_at(sq) {
-                if piece.role == Role::King || piece.role == Role::Pawn { continue; }
+                if piece.role == Role::King || piece.role == Role::Pawn {
+                    continue;
+                }
                 let dist = ksq.distance(sq) as f32;
                 tropism += 7.0 - dist;
             }
@@ -91,46 +103,74 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
         for i in 0..8 {
             let mut file_pieces = 0;
             for r in 0..8 {
-                let sq = Square::from_coords(shakmaty::File::new(i as u32), shakmaty::Rank::new(r as u32));
+                let sq = Square::from_coords(
+                    shakmaty::File::new(i as u32),
+                    shakmaty::Rank::new(r as u32),
+                );
                 if let Some(p) = board.piece_at(sq) {
-                    if p.color == side && (p.role == Role::Rook || p.role == Role::Queen) { file_pieces += 1; }
+                    if p.color == side && (p.role == Role::Rook || p.role == Role::Queen) {
+                        file_pieces += 1;
+                    }
                 }
             }
-            if file_pieces >= 2 { count += 1; }
+            if file_pieces >= 2 {
+                count += 1;
+            }
             let mut rank_pieces = 0;
             for f in 0..8 {
-                let sq = Square::from_coords(shakmaty::File::new(f as u32), shakmaty::Rank::new(i as u32));
+                let sq = Square::from_coords(
+                    shakmaty::File::new(f as u32),
+                    shakmaty::Rank::new(i as u32),
+                );
                 if let Some(p) = board.piece_at(sq) {
-                    if p.color == side && (p.role == Role::Rook || p.role == Role::Queen) { rank_pieces += 1; }
+                    if p.color == side && (p.role == Role::Rook || p.role == Role::Queen) {
+                        rank_pieces += 1;
+                    }
                 }
             }
-            if rank_pieces >= 2 { count += 1; }
+            if rank_pieces >= 2 {
+                count += 1;
+            }
         }
         for s in 0..15 {
             let mut diag_pieces = 0;
             for f in 0..8 {
                 let r = s - f;
                 if (0..8).contains(&r) {
-                    let sq = Square::from_coords(shakmaty::File::new(f as u32), shakmaty::Rank::new(r as u32));
+                    let sq = Square::from_coords(
+                        shakmaty::File::new(f as u32),
+                        shakmaty::Rank::new(r as u32),
+                    );
                     if let Some(p) = board.piece_at(sq) {
-                        if p.color == side && (p.role == Role::Bishop || p.role == Role::Queen) { diag_pieces += 1; }
+                        if p.color == side && (p.role == Role::Bishop || p.role == Role::Queen) {
+                            diag_pieces += 1;
+                        }
                     }
                 }
             }
-            if diag_pieces >= 2 { count += 1; }
+            if diag_pieces >= 2 {
+                count += 1;
+            }
         }
         for d in -7..8 {
             let mut diag_pieces = 0;
             for f in 0..8 {
                 let r = f - d;
                 if (0..8).contains(&r) {
-                    let sq = Square::from_coords(shakmaty::File::new(f as u32), shakmaty::Rank::new(r as u32));
+                    let sq = Square::from_coords(
+                        shakmaty::File::new(f as u32),
+                        shakmaty::Rank::new(r as u32),
+                    );
                     if let Some(p) = board.piece_at(sq) {
-                        if p.color == side && (p.role == Role::Bishop || p.role == Role::Queen) { diag_pieces += 1; }
+                        if p.color == side && (p.role == Role::Bishop || p.role == Role::Queen) {
+                            diag_pieces += 1;
+                        }
                     }
                 }
             }
-            if diag_pieces >= 2 { count += 1; }
+            if diag_pieces >= 2 {
+                count += 1;
+            }
         }
         count as f32
     };
@@ -145,8 +185,11 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
             let sq_file: shakmaty::File = sq.file();
             let file_bb = Bitboard::from_file(sq_file);
             let pawns_on_file = board.by_role(Role::Pawn) & file_bb;
-            if pawns_on_file.is_empty() { count += 1.0; }
-            else if (pawns_on_file & board.by_color(side)).is_empty() { count += 0.5; }
+            if pawns_on_file.is_empty() {
+                count += 1.0;
+            } else if (pawns_on_file & board.by_color(side)).is_empty() {
+                count += 0.5;
+            }
         }
         count
     };
@@ -155,12 +198,22 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
 
     // Connected Rooks
     let connected_rooks = |side: Color| -> f32 {
-        let rooks: Vec<Square> = (board.by_role(Role::Rook) & board.by_color(side)).into_iter().collect();
-        if rooks.len() < 2 { return 0.0; }
+        let rooks: Vec<Square> = (board.by_role(Role::Rook) & board.by_color(side))
+            .into_iter()
+            .collect();
+        if rooks.len() < 2 {
+            return 0.0;
+        }
         let (r0, r1) = (rooks[0], rooks[1]);
-        if r0.rank() != r1.rank() { return 0.0; }
+        if r0.rank() != r1.rank() {
+            return 0.0;
+        }
         let between = attacks::between(r0, r1) & board.occupied();
-        if between.is_empty() { 1.0 } else { 0.0 }
+        if between.is_empty() {
+            1.0
+        } else {
+            0.0
+        }
     };
     feats.insert("connected_rooks_us".to_string(), connected_rooks(turn));
     feats.insert("connected_rooks_them".to_string(), connected_rooks(opp));
@@ -208,7 +261,11 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
     let eg_phase = 1.0 - mg_phase;
 
     let get_pst_val = |sq: Square, role: Role, side: Color| {
-        let idx = if side == Color::White { sq.flip_vertical() as usize } else { sq as usize };
+        let idx = if side == Color::White {
+            sq.flip_vertical() as usize
+        } else {
+            sq as usize
+        };
         let mg = match role {
             Role::Pawn => PST_PAWN[idx],
             Role::Knight => PST_KNIGHT[idx],
@@ -233,7 +290,11 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
     for sq in Square::ALL {
         if let Some(piece) = board.piece_at(sq) {
             let val = get_pst_val(sq, piece.role, piece.color);
-            if piece.color == turn { pst_us += val; } else { pst_them += val; }
+            if piece.color == turn {
+                pst_us += val;
+            } else {
+                pst_them += val;
+            }
         }
     }
     feats.insert("pst_us".to_string(), pst_us);

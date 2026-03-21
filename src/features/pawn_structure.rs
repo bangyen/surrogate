@@ -1,6 +1,6 @@
+use crate::pawn_cache::{pawn_cache, pawn_zobrist, PawnCacheEntry, PAWN_CACHE_SIZE};
 use shakmaty::{attacks, Bitboard, Chess, Color, Position, Role, Square};
 use std::collections::BTreeMap;
-use crate::pawn_cache::{pawn_cache, pawn_zobrist, PawnCacheEntry, PAWN_CACHE_SIZE};
 
 pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp: Color) {
     let board = pos.board();
@@ -43,7 +43,12 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
 
     // Pawn structure features (cached by pawn Zobrist hash)
     let pawn_hash = pawn_zobrist(board);
-    let pawn_key = pawn_hash ^ if turn == Color::White { 0 } else { 0xAAAA_AAAA_AAAA_AAAA };
+    let pawn_key = pawn_hash
+        ^ if turn == Color::White {
+            0
+        } else {
+            0xAAAA_AAAA_AAAA_AAAA
+        };
 
     let pawn_feats = {
         let cache = pawn_cache().lock().unwrap();
