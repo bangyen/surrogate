@@ -215,6 +215,29 @@ impl SurrogateExplainer {
         }
     }
 
+    pub fn get_feature_label(&self, name: &str) -> String {
+        self.feature_templates
+            .get(name)
+            .map(|t| {
+                t.replace(" ({:+.0} cp)", "")
+                    .replace(" ({:+.1} cp)", "")
+                    .replace("**", "")
+            })
+            .unwrap_or_else(|| {
+                name.replace('_', " ")
+                    .split_whitespace()
+                    .map(|w| {
+                        let mut c = w.chars();
+                        match c.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+    }
+
     pub fn explain_move(
         &self,
         features_after: &std::collections::BTreeMap<String, f32>,
@@ -254,25 +277,23 @@ impl SurrogateExplainer {
                 .feature_templates
                 .get(&name)
                 .cloned()
-                .unwrap_or_else(|| {
-                    let title_case = name
-                        .replace('_', " ")
-                        .split_whitespace()
-                        .map(|w| {
-                            let mut c = w.chars();
-                            match c.next() {
-                                None => String::new(),
-                                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    format!("{} ({:+.0} cp)", title_case, cp_value)
-                });
+                .unwrap_or_else(|| format!("{} ({:+.1} cp)", self.get_feature_label(&name), cp_value));
             let explanation = template.replace("{:+.0}", &format!("{:+.0}", cp_value));
             reasons.push((name, cp_value, explanation));
         }
 
         reasons
+    }
+
+    pub fn get_formatted_features(
+        &self,
+        features: &std::collections::BTreeMap<String, f32>,
+    ) -> Vec<(String, String, f32)> {
+        let mut formatted = Vec::new();
+        for (name, &val) in features {
+            formatted.push((name.clone(), self.get_feature_label(name), val));
+        }
+        formatted.sort_by(|a, b| b.2.abs().partial_cmp(&a.2.abs()).unwrap());
+        formatted
     }
 }

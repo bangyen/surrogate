@@ -89,7 +89,7 @@ struct EngineMoveResponse {
 
 #[derive(Serialize)]
 struct AnalysisResponse {
-    features: BTreeMap<String, f32>,
+    features: Vec<(String, String, f32)>, // (raw_name, display_label, value)
     fen: String,
 }
 
@@ -102,7 +102,7 @@ struct HealthResponse {
 
 #[derive(Serialize)]
 struct EngineStatusResponse {
-    ready: bool,
+    model_ready: bool,
     error: bool,
     engine_available: bool,
 }
@@ -218,30 +218,10 @@ async fn make_move_handler(
     // Sync engine if it exists
     if let Some(engine_arc) = &s.engine {
         let mut engine = engine_arc.write().unwrap();
-        let fen = shakmaty::fen::Fen::from_position(&s.board, shakmaty::EnPassantMode::Always)
-            .to_string();
-        let _ = engine.set_position(&fen);
         let _ = engine.make_move(&uci_move.to_string());
     }
 
-    let mut explanation: Option<String> = None;
-    if let Some(model) = &s.model {
-        let explainer = SurrogateExplainer::new(model.clone());
-        let mut board_after = s.board.clone();
-        board_after.play_unchecked(m);
-
-        let feats_after = extract_features(&board_after);
-        let reasons = explainer.explain_move(&feats_after, 3, 0.05);
-        if !reasons.is_empty() {
-            explanation = Some(
-                reasons
-                    .iter()
-                    .map(|(_, _, text)| format!("- {}", text))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            );
-        }
-    }
+    let explanation = generate_explanation(&s, m);
 
     let fen_before =
         shakmaty::fen::Fen::from_position(&s.board, shakmaty::EnPassantMode::Always).to_string();
@@ -287,29 +267,12 @@ async fn engine_move_handler(
 
     let mv_uci = {
         let mut engine = engine_arc.write().unwrap();
-        let fen = shakmaty::fen::Fen::from_position(&s.board, shakmaty::EnPassantMode::Always)
-            .to_string();
-        engine.set_position(&fen).unwrap();
         engine.get_best_move(depth).unwrap()
     };
 
-    let mut explanation = "No explanation available".to_string();
-    if let Some(model) = &s.model {
-        let explainer = SurrogateExplainer::new(model.clone());
-        let uci_move: shakmaty::uci::UciMove = mv_uci.parse().unwrap();
-        let m = uci_move.to_move(&s.board).unwrap();
-        let mut board_after = s.board.clone();
-        board_after.play_unchecked(m);
-        let feats_after = extract_features(&board_after);
-        let reasons = explainer.explain_move(&feats_after, 3, 0.05);
-        if !reasons.is_empty() {
-            explanation = reasons
-                .iter()
-                .map(|(_, _, text)| format!("- {}", text))
-                .collect::<Vec<_>>()
-                .join("\n");
-        }
-    }
+    let uci_move: shakmaty::uci::UciMove = mv_uci.parse().unwrap();
+    let m = uci_move.to_move(&s.board).unwrap();
+    let explanation = generate_explanation(&s, m).unwrap_or_else(|| "No explanation available".to_string());
 
     let feats = extract_features(&s.board);
 
@@ -322,8 +285,11 @@ async fn engine_move_handler(
 }
 
 async fn undo_move_handler(State(state): State<SharedState>) -> Response {
-    let fen_to_restore = {
-        let mut s = state.write().unwrap();
+    let mut s = state.write().unwrap();
+    
+    // Undo Turn: Pop twice if possible (Engine move + Player move)
+    let mut undone = false;
+    for _ in 0..2 {
         if let Some(fen_str) = s.history.pop() {
             let setup: shakmaty::fen::Fen = fen_str.parse().unwrap();
             let board: Chess = setup
@@ -336,14 +302,11 @@ async fn undo_move_handler(State(state): State<SharedState>) -> Response {
                 let mut engine = engine_arc.write().unwrap();
                 let _ = engine.set_position(&fen_str);
             }
-            Some(fen_str)
-        } else {
-            None
+            undone = true;
         }
-    };
+    }
 
-    if fen_to_restore.is_some() {
-        let s = state.read().unwrap();
+    if undone {
         Json(get_board_state(&s)).into_response()
     } else {
         (StatusCode::BAD_REQUEST, "No moves to undo").into_response()
@@ -356,8 +319,18 @@ async fn analyze_features_handler(State(state): State<SharedState>) -> Json<Anal
     let fen =
         shakmaty::fen::Fen::from_position(&s.board, shakmaty::EnPassantMode::Always).to_string();
 
+    let formatted_features = if let Some(model) = &s.model {
+        let explainer = SurrogateExplainer::new(model.clone());
+        explainer.get_formatted_features(&feats)
+    } else {
+        feats
+            .into_iter()
+            .map(|(k, v)| (k.clone(), k, v))
+            .collect::<Vec<_>>()
+    };
+
     Json(AnalysisResponse {
-        features: feats,
+        features: formatted_features,
         fen,
     })
 }
@@ -374,10 +347,31 @@ async fn health_handler(State(state): State<SharedState>) -> Json<HealthResponse
 async fn engine_status_handler(State(state): State<SharedState>) -> Json<EngineStatusResponse> {
     let s = state.read().unwrap();
     Json(EngineStatusResponse {
-        ready: s.model_ready,
+        model_ready: s.model_ready,
         error: s.training_error,
         engine_available: s.engine.is_some(),
     })
+}
+
+fn generate_explanation(s: &GameState, m: shakmaty::Move) -> Option<String> {
+    if let Some(model) = &s.model {
+        let explainer = SurrogateExplainer::new(model.clone());
+        let mut board_after = s.board.clone();
+        board_after.play_unchecked(m);
+
+        let feats_after = extract_features(&board_after);
+        let reasons = explainer.explain_move(&feats_after, 3, 0.05);
+        if !reasons.is_empty() {
+            return Some(
+                reasons
+                    .iter()
+                    .map(|(_, _, text)| format!("- {}", text))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+        }
+    }
+    None
 }
 
 pub async fn start_server(stockfish_path: String, host: String, port: u16) -> Result<()> {
@@ -454,7 +448,7 @@ pub async fn start_server(stockfish_path: String, host: String, port: u16) -> Re
         .route("/api/game/new", post(new_game_handler))
         .route("/api/game/move", post(make_move_handler))
         .route("/api/engine/move", post(engine_move_handler))
-        .route("/api/analysis/features", post(analyze_features_handler))
+        .route("/api/analysis/features", get(analyze_features_handler))
         .route("/api/health", get(health_handler))
         .route("/api/engine/status", get(engine_status_handler))
         .route("/api/game/undo", post(undo_move_handler))

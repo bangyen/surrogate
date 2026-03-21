@@ -91,7 +91,7 @@ class ChessApp {
                 const response = await fetch('/api/engine/status');
                 const data = await response.json();
 
-                if (data.ready) {
+                if (data.model_ready) {
                     this.updateEngineStatus('Ready', true);
                     return true; // Stop polling
                 } else if (data.error) {
@@ -203,9 +203,7 @@ class ChessApp {
 
     async undoMove() {
         try {
-            // Undo engine move
-            await fetch('/api/game/undo', { method: 'POST' });
-            // Undo player move
+            // Undo full turn (Player + Engine move) in one call
             const response = await fetch('/api/game/undo', { method: 'POST' });
             
             if (response.ok) {
@@ -241,7 +239,7 @@ class ChessApp {
     async analyzePosition() {
         try {
             const response = await fetch('/api/analysis/features', {
-                method: 'POST'
+                method: 'GET'
             });
 
             const data = await response.json();
@@ -254,7 +252,7 @@ class ChessApp {
     async getPositionFeatures() {
         try {
             const response = await fetch('/api/analysis/features', {
-                method: 'POST'
+                method: 'GET'
             });
             const data = await response.json();
             return data.features;
@@ -344,14 +342,13 @@ class ChessApp {
     displayTopFeatures(features, container) {
         if (!container) return;
 
-        const topFeatures = Object.entries(features)
-            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
-            .slice(0, 3);
+        // features is now an array of [raw_name, label, value]
+        const topFeatures = features.slice(0, 3);
 
         if (topFeatures.length > 0) {
             let featuresHtml = '';
-            topFeatures.forEach(([name, value]) => {
-                const formattedName = this.formatFeatureName(name);
+            topFeatures.forEach(([_, label, value]) => {
+                const formattedName = label;
                 const formattedValue = value.toFixed(2) + ' cp';
                 featuresHtml += `
                     <div class="feature-item">
@@ -382,7 +379,7 @@ class ChessApp {
     }
 
     formatFeatureName(name) {
-        // Replace _us and _them with player indicators
+        // Fallback for cases where label isn't provided or we only have raw name
         let formatted = name
             .replace(/_us$/, ' (White)')
             .replace(/_them$/, ' (Black)');
@@ -400,18 +397,15 @@ class ChessApp {
         const container = document.getElementById('features-table');
         if (!container) return;
 
-        const activeFeatures = Object.entries(features)
-            .filter(([_, value]) => Math.abs(value) >= 0.001)
-            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
-
-        const topFeatures = activeFeatures.filter(([_, value]) => Math.abs(value) >= 10.0);
-        const otherFeatures = activeFeatures.filter(([_, value]) => Math.abs(value) < 10.0);
+        // features is [raw_name, label, value]
+        const topFeatures = features.filter(([_, __, value]) => Math.abs(value) >= 10.0);
+        const otherFeatures = features.filter(([_, __, value]) => Math.abs(value) < 10.0);
 
         let html = '';
         
         // Render top features
-        topFeatures.forEach(([name, value]) => {
-            const formattedName = this.formatFeatureName(name);
+        topFeatures.forEach(([_, label, value]) => {
+            const formattedName = label;
             const formattedValue = value.toFixed(2) + ' cp';
             html += `
                 <div class="feature-row">
@@ -432,8 +426,8 @@ class ChessApp {
                     <div class="accordion-content hidden" id="others-container">
             `;
             
-            otherFeatures.forEach(([name, value]) => {
-                const formattedName = this.formatFeatureName(name);
+            otherFeatures.forEach(([_, label, value]) => {
+                const formattedName = label;
                 const formattedValue = value.toFixed(2) + ' cp';
                 html += `
                     <div class="feature-row sub-feature">
