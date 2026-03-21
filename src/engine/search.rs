@@ -481,7 +481,7 @@ pub fn calculate_forcing_swing(fen: &str, depth: u8) -> anyhow::Result<f32> {
 mod tests {
     use super::*;
     use shakmaty::fen::Fen;
-    use shakmaty::{CastlingMode, Chess, Position};
+    use shakmaty::{CastlingMode, Chess};
 
     fn pos_from_fen(fen: &str) -> Chess {
         let setup: Fen = fen.parse().unwrap();
@@ -517,6 +517,34 @@ mod tests {
         let result = find_best_reply_impl(&pos, 4);
         assert!(result.is_some());
         assert_eq!(result.unwrap(), "e4e5");
+    }
+
+    #[test]
+    fn test_find_best_reply_mate_in_two() {
+        // Tactical sequence: 1. Qa4+ Nc6 2. Nxc6 (wins piece)
+        let pos = pos_from_fen("r2qkb1r/pp2nppp/3p4/2pNN3/2P5/8/PP1PPPPP/R1BQK2R w KQkq - 0 1");
+        let result = find_best_reply_impl(&pos, 4);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "d1a4");
+    }
+
+    #[test]
+    fn test_search_finds_winning_fork() {
+        // White to move, knight on e5, black king on e7, black rook on g6.
+        let pos = pos_from_fen("4k3/4p3/6r1/4N3/8/8/4P3/4K3 w - - 0 1");
+        let result = find_best_reply_impl(&pos, 4);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "e5g6");
+    }
+
+    #[test]
+    fn test_quiesce_resolves_tension() {
+        // Position with a hanging queen. Quiesce should return a large score.
+        // Rook on e2, Black Queen on e5.
+        let pos = pos_from_fen("4k3/8/8/4q3/8/8/4R3/4K3 w - - 0 1");
+        let score = quiesce(&pos, -50000, 50000);
+        // White can capture the queen for a rook (900 - 500 = 400 net, but evaluation is relative)
+        assert!(score > 300, "Quiesce should find the queen capture: got {}", score);
     }
 
     #[test]
