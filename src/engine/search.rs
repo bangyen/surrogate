@@ -544,7 +544,11 @@ mod tests {
         let pos = pos_from_fen("4k3/8/8/4q3/8/8/4R3/4K3 w - - 0 1");
         let score = quiesce(&pos, -50000, 50000);
         // White can capture the queen for a rook (900 - 500 = 400 net, but evaluation is relative)
-        assert!(score > 300, "Quiesce should find the queen capture: got {}", score);
+        assert!(
+            score > 300,
+            "Quiesce should find the queen capture: got {}",
+            score
+        );
     }
 
     #[test]

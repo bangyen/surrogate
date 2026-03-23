@@ -254,28 +254,45 @@ mod tests {
     fn test_pst_comprehensive() {
         use shakmaty::{Role, Square};
         // Verify that PST penalties are actually penalties and bonuses are bonuses.
-        let roles = [Role::Pawn, Role::Knight, Role::Bishop, Role::Rook, Role::Queen, Role::King];
-        
+        let roles = [
+            Role::Pawn,
+            Role::Knight,
+            Role::Bishop,
+            Role::Rook,
+            Role::Queen,
+            Role::King,
+        ];
+
         for role in roles {
             for square in Square::ALL {
                 let pst = pst_value(role, square, shakmaty::Color::White, 14);
-                if pst == 0 { continue; }
-                
+                if pst == 0 {
+                    continue;
+                }
+
                 // We'll use a board with the piece at 'square' and kings at far corners.
-                
+
                 // Anchor points for catching sign-deletion in PST tables.
                 if role == Role::Pawn && square == Square::D2 {
                     // Pawn on D2 has penalty -20
                     assert!(pst < 0, "Pawn on D2 should have a PST penalty: got {}", pst);
                 }
                 if role == Role::Knight && square == Square::A1 {
-                    assert!(pst < 0, "Knight on A1 should have a PST penalty: got {}", pst);
+                    assert!(
+                        pst < 0,
+                        "Knight on A1 should have a PST penalty: got {}",
+                        pst
+                    );
                 }
                 if role == Role::Knight && square == Square::E4 {
                     assert!(pst > 0, "Knight on E4 should have a PST bonus: got {}", pst);
                 }
                 if role == Role::Bishop && square == Square::A1 {
-                    assert!(pst < 0, "Bishop on A1 should have a PST penalty: got {}", pst);
+                    assert!(
+                        pst < 0,
+                        "Bishop on A1 should have a PST penalty: got {}",
+                        pst
+                    );
                 }
                 if role == Role::Rook && square == Square::A1 {
                     assert!(pst == 0, "Rook on A1 should have 0 pst: got {}", pst);
@@ -285,11 +302,19 @@ mod tests {
                     assert!(pst > 0, "Rook on 7th rank bonus: got {}", pst);
                 }
                 if role == Role::Queen && square == Square::A1 {
-                    assert!(pst < 0, "Queen on A1 should have a PST penalty: got {}", pst);
+                    assert!(
+                        pst < 0,
+                        "Queen on A1 should have a PST penalty: got {}",
+                        pst
+                    );
                 }
                 if role == Role::King && square == Square::G1 {
                     // Middlegame King at G1 (castled) is a bonus 30
-                    assert!(pst > 0, "King on G1 (MG) should have a PST bonus: got {}", pst);
+                    assert!(
+                        pst > 0,
+                        "King on G1 (MG) should have a PST bonus: got {}",
+                        pst
+                    );
                 }
             }
         }
