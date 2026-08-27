@@ -11,6 +11,19 @@ use crate::features::extract_features;
 use crate::ml::model::{PhaseEnsemble, PhaseModel};
 use crate::ml::scaler::StandardScaler;
 
+/// Largest evaluation magnitude kept in training targets.
+///
+/// Stockfish reports forced mates near ±10000.  Random-play positions
+/// contain plenty of them, and letting those through makes the surrogate
+/// fit a handful of enormous targets at the expense of the ordinary
+/// ±50 cp swings the explanations are actually about.
+pub const EVAL_CLIP_CP: i32 = 1000;
+
+/// Clamp an engine evaluation into the range the surrogate is fit over.
+pub fn clip_eval(cp: i32) -> i32 {
+    cp.clamp(-EVAL_CLIP_CP, EVAL_CLIP_CP)
+}
+
 pub fn board_phase_value(pos: &Chess) -> i32 {
     let board = pos.board();
     let mut val = 0;
@@ -93,6 +106,7 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
     let mut y_raw = Vec::new();
     let mut feature_names = Vec::new();
     let mut set_feature_names = false;
+    let mut row_phase: Vec<String> = Vec::new();
 
     for (i, b) in boards.iter().enumerate() {
         if (i + 1) % 10 == 0 {
@@ -150,7 +164,7 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
                     }
                     let after_eval = after_eval_res.unwrap();
 
-                    let delta = after_eval - base_eval;
+                    let delta = clip_eval(after_eval) - clip_eval(base_eval);
 
                     let feats = extract_features(&b_after);
                     if !set_feature_names {
@@ -164,6 +178,9 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
                     }
                     x_raw.push(row);
                     y_raw.push(delta as f64);
+                    // Each position contributes one row per candidate
+                    // move, so remember which board each row came from.
+                    row_phase.push(classify_phase(b));
                 }
             }
         }
@@ -206,12 +223,11 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
     });
 
     for phase_name in ["opening", "middlegame", "endgame"] {
-        let mut idx = Vec::new();
-        for i in 0..n_samples {
-            if i < boards.len() && classify_phase(&boards[i]) == phase_name {
-                idx.push(i);
-            }
-        }
+        // Rows are per (position, move), so the phase of row `i` comes
+        // from the recorded source board, not from `boards[i]`.
+        let idx: Vec<usize> = (0..n_samples)
+            .filter(|&i| row_phase[i] == phase_name)
+            .collect();
 
         if idx.len() > 20 {
             println!(
@@ -287,4 +303,35 @@ fn cross_validate_elastic_net(dataset: &Dataset<f64, f64, ndarray::Ix1>) -> Resu
         }
     }
     Ok(best_params)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clip_eval_leaves_ordinary_scores_alone() {
+        assert_eq!(clip_eval(0), 0);
+        assert_eq!(clip_eval(250), 250);
+        assert_eq!(clip_eval(-999), -999);
+        assert_eq!(clip_eval(EVAL_CLIP_CP), EVAL_CLIP_CP);
+    }
+
+    #[test]
+    fn test_clip_eval_bounds_mate_scores() {
+        // Stockfish reports mates near +-10000; unclipped they dominate
+        // the regression targets.
+        assert_eq!(clip_eval(9999), EVAL_CLIP_CP);
+        assert_eq!(clip_eval(-9999), -EVAL_CLIP_CP);
+        assert_eq!(clip_eval(i32::MAX), EVAL_CLIP_CP);
+        assert_eq!(clip_eval(i32::MIN), -EVAL_CLIP_CP);
+    }
+
+    #[test]
+    fn test_classify_phase_thresholds() {
+        // Phase value counts non-pawn, non-king pieces.
+        let start = Chess::default();
+        assert_eq!(board_phase_value(&start), 14);
+        assert_eq!(classify_phase(&start), "opening");
+    }
 }
