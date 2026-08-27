@@ -92,11 +92,21 @@ impl WasmGame {
             .map_err(|e| JsError::new(&format!("{e}")))
     }
 
-    /// Search for the engine's reply and play it, returning the move in
-    /// UCI notation.  Returns `None` when the game is already over.
+    /// Search for the engine's best move *without* playing it, returning
+    /// UCI notation.  Returns `None` when there is no legal move.
     ///
-    /// This runs on the caller's thread, so keep `depth` modest: the
+    /// Searching and playing are separate so a caller can explain the
+    /// move first: `explain` describes a move from the position it is
+    /// played in, which is gone once the move has been applied.
+    ///
+    /// This runs on the caller's thread, so keep `depth` modest -- the
     /// browser is unresponsive until it returns.
+    #[wasm_bindgen(js_name = searchMove)]
+    pub fn search_move(&self, depth: u8) -> Option<String> {
+        self.game.best_move(depth)
+    }
+
+    /// Search for the engine's reply and play it in one step.
     #[wasm_bindgen(js_name = playEngineMove)]
     pub fn play_engine_move(&mut self, depth: u8) -> Result<Option<String>, JsError> {
         let Some(mv) = self.game.best_move(depth) else {
