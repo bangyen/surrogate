@@ -6,9 +6,9 @@ measures how faithful those explanations actually are.
 [![CI](https://github.com/bangyen/surrogate/actions/workflows/ci.yml/badge.svg)](https://github.com/bangyen/surrogate/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/bangyen/surrogate)](LICENSE)
 
-**[▶ Play it in your browser](https://bangyen.github.io/surrogate/demo.html)** — the
-engine is compiled to WebAssembly and runs entirely in the page. No install, no
-server, no Stockfish.
+**Runs in a browser** — the engine compiles to WebAssembly and plays entirely
+in the page, with no server and no Stockfish. Build it with `just wasm` and
+serve it with `just demo`.
 
 <p align="center">
   <img src="docs/audit-demo.gif" alt="Demo preview" width="600">
@@ -109,8 +109,7 @@ just demo
 The browser demo compiles the engine, feature extraction and ML inference
 to WebAssembly and runs them in the page — no server, no Stockfish. The
 opponent is this project's own alpha-beta search, and the surrogate model
-ships as a JSON asset, so explanations work offline. It deploys to GitHub
-Pages on every push to `main`.
+ships as a JSON asset, so explanations work offline.
 
 ## Results
 <a id="results"></a>
