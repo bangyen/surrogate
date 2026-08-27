@@ -62,6 +62,9 @@ enum Commands {
         /// Compare against the committed report and fail on regressions
         #[arg(long)]
         check: bool,
+        /// Sampling seed; fixed by default so runs are comparable
+        #[arg(long)]
+        seed: Option<u64>,
     },
     /// Train the surrogate model
     Train {
@@ -275,6 +278,7 @@ fn main() -> Result<()> {
             depth,
             out,
             check,
+            seed,
         } => {
             if !Path::new(&model_path).exists() {
                 return Err(anyhow::anyhow!(
@@ -320,6 +324,7 @@ fn main() -> Result<()> {
                 stockfish_path,
                 n_positions,
                 depth,
+                seed: seed.unwrap_or(chess_ai_rust::audit::DEFAULT_SEED),
                 ..Default::default()
             };
             println!(
