@@ -67,32 +67,51 @@ just web
 
 ## Results
 
-Measured over 98 sampled positions at depth 12 by `just metrics`, against a
-surrogate model trained on 200 positions. Regenerate with `just metrics`;
-verify a committed report with `just metrics-check`.
+Measured by `just metrics` over 297 sampled positions at depth 12, against a
+surrogate trained on 400 positions. Sampling is seeded, so the run is
+reproducible: `just metrics` regenerates this table and `just metrics-check`
+verifies the committed report.
 
-| Metric | Value | Target | |
-|--------|-------|--------|---|
-| Decisive Faithfulness | **0.800** | ≥ 0.80 | ✅ |
-| Position Coverage | **1.000** | ≥ 0.70 | ✅ |
-| Explanation Sparsity | **9.49** | ≤ 4.0 | ❌ |
-| Move Ranking (τ) | **0.299** | ≥ 0.45 | ❌ |
-| Fidelity (R²) | **-0.015** | ≥ 0.35 | ❌ |
+| Metric | Value | Target | | n |
+|--------|-------|--------|---|---|
+| Explanation Sparsity | **2.67** | ≤ 4.0 | ✅ | 92 |
+| Position Coverage | **1.000** | ≥ 0.70 | ✅ | 92 |
+| Decisive Faithfulness | **0.738 ± 0.107** | ≥ 0.70 | ✅ | 65 |
+| Move Ranking (τ) | **0.001** | *reported* | — | 297 |
+| Fidelity (R²) | **0.015** | *reported* | — | 889 |
 
-**Reading these honestly:** the surrogate agrees with the engine about which
-of two clearly-separated moves is better 80% of the time, and almost always
-has more than one feature to point at. It is *not* yet a faithful model of
-the engine's evaluation: an R² near zero means it predicts about as well as
-guessing the mean, and explanations currently lean on ~9 features where a
-readable one would use 3–4.
+**What this says.** When the engine clearly prefers one move over another, the
+surrogate agrees about three times in four, and it says so using fewer than
+three features — an explanation a reader can actually follow. What it cannot
+do is reproduce the engine's *full* ordering of moves, or predict how much an
+evaluation will swing.
 
-These numbers replace an earlier table that reported 86.7% faithfulness and
-R² 0.48. That table was inherited from a Python predecessor whose measurement
-code did not survive the Rust rewrite — it described a gradient-boosted model
-over an enriched featureset, scored on a held-out split of its own training
-sample. The current pipeline is a linear model over plain features, audited
-against freshly sampled positions, so the two are not comparable. The
-numbers above are what this code actually produces.
+**Why τ and R² are reported rather than targeted.** Those two are not tuning
+failures; they are the ceiling of this approach, established by measurement:
+
+- With regularization at effectively zero, a linear model over these features
+  explains only **R² ≈ 0.20 in-sample**, and 0.12–0.16 out of sample. The best
+  single feature correlates 0.23 with the target; the median correlates 0.04.
+- Move-ranking τ was **statistically indistinguishable from zero across four
+  independently trained variants** (−0.05, 0.08, 0.13, 0.00).
+
+Raising them means either much richer features or a nonlinear surrogate — and
+a nonlinear model would forfeit the per-feature attribution that makes these
+explanations readable in the first place. That trade is not worth making
+silently, so the numbers stand as measured.
+
+**A note on measurement power.** Faithfulness is computed only over positions
+where the engine had a clear preference — 65 of 297 here — so its 95% interval
+is ±0.107 even at this sample size. Differences smaller than that are not
+detectable by this harness, which is why the targets above are set where
+measurement can actually support them.
+
+An earlier version of this table reported 86.7% faithfulness and R² 0.48.
+Those came from a Python predecessor measuring a gradient-boosted model over
+an enriched featureset, scored on a held-out split of its own training sample.
+The measurement code did not survive the Rust rewrite; the numbers did. They
+are not comparable to a linear model audited against freshly sampled
+positions, and they have been replaced with what this code actually produces.
 
 ## Features
 

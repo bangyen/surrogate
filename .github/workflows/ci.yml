@@ -31,3 +31,5 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test
+      - name: Verify explainability metrics
+        run: cargo run --release --bin chess-ai -- metrics --check
