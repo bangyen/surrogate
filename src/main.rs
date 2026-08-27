@@ -290,16 +290,44 @@ fn main() -> Result<()> {
                 serde_json::from_str(&std::fs::read_to_string(&model_path)?)?;
 
             if check {
-                // Verify the committed report rather than re-measuring:
-                // a check should be fast and deterministic.
-                if !Path::new(&out).exists() {
-                    return Err(anyhow::anyhow!(
-                        "No report at {}. Run `just metrics` to generate one.",
-                        out
-                    ));
-                }
-                let report: AuditReport = serde_json::from_str(&std::fs::read_to_string(&out)?)?;
+                // Re-measure, then compare against the committed report.
+                //
+                // Re-reading the committed file alone would validate
+                // nothing: the model could be replaced wholesale and the
+                // stale numbers would still pass.
+                let cfg = AuditConfig {
+                    stockfish_path,
+                    n_positions,
+                    depth,
+                    seed: seed.unwrap_or(chess_ai_rust::audit::DEFAULT_SEED),
+                    ..Default::default()
+                };
+                println!(
+                    "Re-measuring over {} positions at depth {}...",
+                    n_positions, depth
+                );
+                let report = run_audit(&model, &cfg)?;
                 println!("{}", report.to_markdown());
+
+                // Report drift against the committed baseline, which
+                // catches a change that still clears the targets.
+                if Path::new(&out).exists() {
+                    if let Ok(prev) =
+                        serde_json::from_str::<AuditReport>(&std::fs::read_to_string(&out)?)
+                    {
+                        for m in &report.metrics {
+                            if let Some(p) = prev.metrics.iter().find(|p| p.name == m.name) {
+                                let delta = m.value - p.value;
+                                if delta.abs() >= 0.05 {
+                                    println!(
+                                        "   {} moved {:+.3} since the committed baseline ({:.3} -> {:.3})",
+                                        m.name, delta, p.value, m.value
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
 
                 let failures = report.failures();
                 if failures.is_empty() {

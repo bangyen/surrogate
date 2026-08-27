@@ -32,4 +32,27 @@ jobs:
       - name: Test
         run: cargo test
       - name: Verify explainability metrics
-        run: cargo run --release --bin chess-ai -- metrics --check
+        # Re-measures against the committed model rather than re-reading
+        # the report, so a regression in the model or trainer fails here.
+        # A reduced sample keeps CI to a couple of minutes; the committed
+        # baseline is generated at 300 positions and depth 12.
+        run: |
+          cargo run --release --bin chess-ai -- metrics --check \
+            --n-positions 60 --depth 10
+
+  wasm:
+    name: Browser build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # The pure core must keep compiling without the native feature, or
+      # the browser demo silently breaks while every other check passes.
+      - name: Build for wasm
+        run: |
+          cargo check --target wasm32-unknown-unknown \
+            --no-default-features --features wasm --lib
