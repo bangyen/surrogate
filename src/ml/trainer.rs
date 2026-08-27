@@ -3,7 +3,7 @@ use linfa::prelude::*;
 use linfa_elasticnet::ElasticNet;
 use ndarray::{Array1, Array2, Axis};
 use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use shakmaty::{Chess, Position, Role, Square};
 
 use crate::engine::UciEngine;
@@ -22,6 +22,20 @@ pub const EVAL_CLIP_CP: i32 = 1000;
 /// Clamp an engine evaluation into the range the surrogate is fit over.
 pub fn clip_eval(cp: i32) -> i32 {
     cp.clamp(-EVAL_CLIP_CP, EVAL_CLIP_CP)
+}
+
+/// Bound on a single training target, applied after the delta is formed.
+///
+/// Even with mate scores clipped, a handful of positions swing by many
+/// hundreds of centipawns and dominate a squared-error fit.  Bounding the
+/// target keeps the model fitting the ordinary positions the
+/// explanations are about.  Applied to the audit's targets too, so both
+/// measure the same quantity.
+pub const TARGET_CLIP_CP: f64 = 400.0;
+
+/// Clamp a training target into the range the surrogate is fit over.
+pub fn clip_target(delta: f64) -> f64 {
+    delta.clamp(-TARGET_CLIP_CP, TARGET_CLIP_CP)
 }
 
 pub fn board_phase_value(pos: &Chess) -> i32 {
@@ -107,6 +121,7 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
     let mut feature_names = Vec::new();
     let mut set_feature_names = false;
     let mut row_phase: Vec<String> = Vec::new();
+    let mut dump_fens: Vec<String> = Vec::new();
 
     for (i, b) in boards.iter().enumerate() {
         if (i + 1) % 10 == 0 {
@@ -177,7 +192,8 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
                         row.push(*feats.get(name).unwrap_or(&0.0) as f64);
                     }
                     x_raw.push(row);
-                    y_raw.push(delta as f64);
+                    y_raw.push(clip_target(delta as f64));
+                    dump_fens.push(fen_final.clone());
                     // Each position contributes one row per candidate
                     // move, so remember which board each row came from.
                     row_phase.push(classify_phase(b));
@@ -188,6 +204,16 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
 
     if x_raw.is_empty() {
         return Err(anyhow!("No training data collected"));
+    }
+
+    // Optional dump for offline analysis of the training set.
+    if let Ok(path) = std::env::var("CHESS_AI_DUMP_TRAINING") {
+        if let Ok(json) =
+            serde_json::to_string(&(&x_raw, &y_raw, &feature_names, &row_phase, &dump_fens))
+        {
+            let _ = std::fs::write(&path, json);
+            println!("Dumped training data to {}", path);
+        }
     }
 
     let n_samples = x_raw.len();
@@ -260,8 +286,20 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
     Ok(ensemble)
 }
 
+/// Choose ElasticNet hyper-parameters by cross-validation.
+///
+/// Rows arrive in blocks -- several candidate moves per sampled position,
+/// grouped by phase -- so the dataset is shuffled before splitting.
+/// Contiguous folds would otherwise validate against positions closely
+/// related to the ones just trained on.
 fn cross_validate_elastic_net(dataset: &Dataset<f64, f64, ndarray::Ix1>) -> Result<(f64, f64)> {
-    let alphas = [0.01, 0.1, 1.0, 10.0];
+    let mut rng = rand::rngs::StdRng::seed_from_u64(0xC0FFEE);
+    let dataset = &dataset.clone().shuffle(&mut rng);
+
+    // The upper end matters: with weakly-correlated features the best
+    // cross-validated penalty sits far above 10, and a grid that caps
+    // there silently returns its own boundary.
+    let alphas = [0.01, 0.1, 1.0, 10.0, 30.0, 100.0, 300.0, 1000.0];
     let l1_ratios = [0.5, 0.7, 0.9, 1.0];
 
     if dataset.nsamples() < 10 {
@@ -325,6 +363,18 @@ mod tests {
         assert_eq!(clip_eval(-9999), -EVAL_CLIP_CP);
         assert_eq!(clip_eval(i32::MAX), EVAL_CLIP_CP);
         assert_eq!(clip_eval(i32::MIN), -EVAL_CLIP_CP);
+    }
+
+    #[test]
+    fn test_clip_target_bounds_extreme_swings() {
+        assert_eq!(clip_target(0.0), 0.0);
+        assert_eq!(clip_target(250.0), 250.0);
+        assert_eq!(clip_target(TARGET_CLIP_CP), TARGET_CLIP_CP);
+        // A handful of huge swings would otherwise dominate a
+        // squared-error fit.
+        assert_eq!(clip_target(1200.0), TARGET_CLIP_CP);
+        assert_eq!(clip_target(-1200.0), -TARGET_CLIP_CP);
+        assert!(clip_target(f64::INFINITY).is_finite());
     }
 
     #[test]

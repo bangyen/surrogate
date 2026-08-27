@@ -18,7 +18,7 @@ use shakmaty::{Chess, Position};
 
 use crate::engine::UciEngine;
 use crate::features::extract_features;
-use crate::ml::trainer::{clip_eval, generate_stratified_positions};
+use crate::ml::trainer::{clip_eval, clip_target, generate_stratified_positions};
 use crate::ml::PhaseEnsemble;
 
 /// Thresholds each metric is expected to meet, as reported in the README.
@@ -163,7 +163,7 @@ fn evaluate_move(
     let after_eval = engine.get_evaluation(&fen_final, depth).ok()?;
     // Clipped exactly as ml::trainer clips its targets; measuring against
     // an unclipped swing would compare the model to a different scale.
-    let delta = (clip_eval(after_eval) - clip_eval(base_eval)) as f64;
+    let delta = clip_target((clip_eval(after_eval) - clip_eval(base_eval)) as f64);
 
     let feats = extract_features(&after);
     let mut vec = Array1::zeros(feature_names.len());

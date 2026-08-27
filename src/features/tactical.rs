@@ -1,4 +1,5 @@
 use crate::eval::piece_value;
+use crate::see::see;
 use shakmaty::{Bitboard, Chess, Color, Position, Role};
 use std::collections::BTreeMap;
 
@@ -138,4 +139,65 @@ pub fn extract(pos: &Chess, feats: &mut BTreeMap<String, f32>, turn: Color, opp:
     };
     feats.insert("threats_us".to_string(), count_threats(turn));
     feats.insert("threats_them".to_string(), count_threats(opp));
+
+    // ── Static-exchange threats ──────────────────────────────────────
+    //
+    // The features above count *whether* pieces hang; these measure how
+    // much material is actually at stake, which is what the engine's
+    // evaluation swings on.  Without them the surrogate has no way to
+    // see tactics at all.
+
+    // Best material we can win with a capture right now.
+    let mut best_gain = 0i32;
+    for m in pos.legal_moves() {
+        if m.is_capture() {
+            if let Some(from) = m.from() {
+                best_gain = best_gain.max(see(board, m.to(), from));
+            }
+        }
+    }
+    feats.insert("see_best_capture".to_string(), best_gain as f32);
+
+    // Most material the opponent threatens to win in reply.  Swapping the
+    // side to move asks "what could they do if it were their turn".
+    let threat = pos
+        .clone()
+        .swap_turn()
+        .ok()
+        .map(|swapped| {
+            let b = swapped.board();
+            let mut worst = 0i32;
+            for m in swapped.legal_moves() {
+                if m.is_capture() {
+                    if let Some(from) = m.from() {
+                        worst = worst.max(see(b, m.to(), from));
+                    }
+                }
+            }
+            worst
+        })
+        .unwrap_or(0);
+    feats.insert("see_worst_threat".to_string(), threat as f32);
+
+    // Total value of our undefended attacked material, as opposed to a
+    // bare count of how many pieces are loose.
+    let hanging_value = |side: Color| -> f32 {
+        let mut total = 0i32;
+        for sq in board.by_color(side) {
+            let Some(piece) = board.piece_at(sq) else {
+                continue;
+            };
+            if piece.role == Role::King {
+                continue;
+            }
+            let attacked = board.attacks_to(sq, side.other(), occupied);
+            let defended = board.attacks_to(sq, side, occupied);
+            if !attacked.is_empty() && defended.is_empty() {
+                total += piece_value(piece.role);
+            }
+        }
+        total as f32
+    };
+    feats.insert("hanging_value_us".to_string(), hanging_value(turn));
+    feats.insert("hanging_value_them".to_string(), hanging_value(opp));
 }
