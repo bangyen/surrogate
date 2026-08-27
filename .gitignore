@@ -4,9 +4,6 @@ target/
 *.dylib
 *.dll
 
-# Model artifacts
-model.json
-
 # macOS
 .DS_Store
 
