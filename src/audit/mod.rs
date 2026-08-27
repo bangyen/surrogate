@@ -18,7 +18,7 @@ use shakmaty::{Chess, Position};
 
 use crate::engine::UciEngine;
 use crate::features::extract_features;
-use crate::ml::trainer::{clip_eval, clip_target, generate_stratified_positions};
+use crate::ml::trainer::{clip_eval, clip_target, generate_stratified_positions_seeded};
 use crate::ml::PhaseEnsemble;
 
 /// Thresholds each metric is expected to meet, as reported in the README.
@@ -35,6 +35,9 @@ pub const DEFAULT_GAP_CP: f64 = 50.0;
 /// Minimum absolute coefficient for a feature to count toward coverage.
 pub const DEFAULT_WEIGHT_THRESHOLD: f64 = 0.01;
 
+/// Default sampling seed, fixed so repeated audits are comparable.
+pub const DEFAULT_SEED: u64 = 0x5EED_C4E5;
+
 /// Centipawn gap between the two moves' *outcomes* required to call the
 /// comparison decisive.  Distinct from `DEFAULT_GAP_CP`, which filters on
 /// the engine's scores before either move is played.
@@ -49,6 +52,9 @@ pub struct AuditConfig {
     pub multipv: u32,
     pub gap_cp: f64,
     pub weight_threshold: f64,
+    /// Seed for position sampling, so runs are reproducible and two
+    /// models can be compared on identical positions.
+    pub seed: u64,
 }
 
 impl Default for AuditConfig {
@@ -60,6 +66,7 @@ impl Default for AuditConfig {
             multipv: 3,
             gap_cp: DEFAULT_GAP_CP,
             weight_threshold: DEFAULT_WEIGHT_THRESHOLD,
+            seed: DEFAULT_SEED,
         }
     }
 }
@@ -93,6 +100,9 @@ pub struct AuditReport {
     pub n_positions_requested: usize,
     pub n_positions_evaluated: usize,
     pub depth: u32,
+    /// Sampling seed, so a report identifies the positions it measured.
+    #[serde(default)]
+    pub seed: u64,
 }
 
 impl AuditReport {
@@ -207,7 +217,7 @@ pub fn run_audit(model: &PhaseEnsemble, cfg: &AuditConfig) -> Result<AuditReport
     }
 
     let mut engine = UciEngine::new(&cfg.stockfish_path)?;
-    let boards = generate_stratified_positions(cfg.n_positions);
+    let boards = generate_stratified_positions_seeded(cfg.n_positions, cfg.seed);
     let names = &model.feature_names;
 
     let mut t = Tallies::default();
@@ -368,6 +378,7 @@ fn build_report(t: &Tallies, cfg: &AuditConfig, evaluated: usize) -> AuditReport
         n_positions_requested: cfg.n_positions,
         n_positions_evaluated: evaluated,
         depth: cfg.depth,
+        seed: cfg.seed,
     }
 }
 
@@ -408,6 +419,7 @@ mod tests {
             n_positions_requested: 10,
             n_positions_evaluated: 10,
             depth: 12,
+            seed: DEFAULT_SEED,
         };
         assert!(report.passes());
         assert!(report.failures().is_empty());
@@ -439,6 +451,7 @@ mod tests {
             n_positions_requested: 100,
             n_positions_evaluated: 90,
             depth: 12,
+            seed: DEFAULT_SEED,
         };
 
         let md = report.to_markdown();
@@ -456,6 +469,7 @@ mod tests {
             n_positions_requested: 100,
             n_positions_evaluated: 88,
             depth: 12,
+            seed: DEFAULT_SEED,
         };
         let json = serde_json::to_string_pretty(&report).unwrap();
         let back: AuditReport = serde_json::from_str(&json).unwrap();

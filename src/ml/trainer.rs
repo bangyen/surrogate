@@ -64,7 +64,17 @@ pub fn classify_phase(pos: &Chess) -> String {
 }
 
 pub fn generate_stratified_positions(n: usize) -> Vec<Chess> {
-    let mut rng = rand::thread_rng();
+    generate_stratified_positions_seeded(n, rand::thread_rng().gen())
+}
+
+/// Sample positions from a given seed.
+///
+/// The audit needs this: sampling fresh positions every run makes two
+/// measurements incomparable, and with only a few dozen decisive
+/// comparisons per run the sampling noise swamps real differences
+/// between models.
+pub fn generate_stratified_positions_seeded(n: usize, seed: u64) -> Vec<Chess> {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let targets = [
         ("opening", (n as f32 * 0.25) as usize),
         ("middlegame", (n as f32 * 0.50) as usize),
