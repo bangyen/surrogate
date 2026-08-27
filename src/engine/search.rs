@@ -592,4 +592,221 @@ mod tests {
             );
         }
     }
+
+    // ── Move ordering ────────────────────────────────────────────────
+
+    /// Look up the ordering score `score_moves` assigned to one move.
+    fn score_of(scored: &[(i32, Move)], uci: &str) -> i32 {
+        scored
+            .iter()
+            .find(|(_, m)| m.to_uci(CastlingMode::Standard).to_string() == uci)
+            .unwrap_or_else(|| panic!("move {uci} not among legal moves"))
+            .0
+    }
+
+    #[test]
+    fn test_score_moves_tt_move_ranks_first() {
+        let pos = pos_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        let ctx = SearchContext::new();
+        let moves: Vec<Move> = pos.legal_moves().into_iter().collect();
+
+        // Pick an ordinary quiet move and nominate it as the TT move.
+        let tt_move = moves
+            .iter()
+            .find(|m| m.to_uci(CastlingMode::Standard).to_string() == "a2a3")
+            .copied()
+            .unwrap();
+
+        let scored = score_moves(&pos, &moves, &ctx, Some(&tt_move));
+        let best = scored.iter().max_by_key(|(s, _)| *s).unwrap();
+        assert_eq!(
+            best.1.to_uci(CastlingMode::Standard).to_string(),
+            "a2a3",
+            "TT move must sort ahead of every other move"
+        );
+    }
+
+    #[test]
+    fn test_score_moves_mvv_lva_prefers_valuable_victim() {
+        // White pawn on d4 and knight on f3 can both capture on e5;
+        // White also has a rook capture available on a7.
+        let pos = pos_from_fen("rnbqkbnr/pppp1ppp/8/4p3/3P4/5N2/PPP1PPPP/RNBQKB1R w KQkq - 0 1");
+        let moves: Vec<Move> = pos.legal_moves().into_iter().collect();
+        let ctx = SearchContext::new();
+        let scored = score_moves(&pos, &moves, &ctx, None);
+
+        let pawn_takes = score_of(&scored, "d4e5");
+        let knight_takes = score_of(&scored, "f3e5");
+
+        // Same victim, cheaper attacker wins: pawn before knight.
+        assert!(
+            pawn_takes > knight_takes,
+            "PxP ({pawn_takes}) should outrank NxP ({knight_takes})"
+        );
+
+        // Every capture outranks every quiet move.
+        let quiet = score_of(&scored, "a2a3");
+        assert!(
+            knight_takes > quiet,
+            "capture ({knight_takes}) should outrank quiet move ({quiet})"
+        );
+    }
+
+    #[test]
+    fn test_score_moves_promotion_outranks_capture() {
+        // White pawn on b7 may promote, and may also capture the rook on a8.
+        let pos = pos_from_fen("r3k3/1P6/8/8/8/8/8/4K3 w - - 0 1");
+        let moves: Vec<Move> = pos.legal_moves().into_iter().collect();
+        let ctx = SearchContext::new();
+        let scored = score_moves(&pos, &moves, &ctx, None);
+
+        let promo = score_of(&scored, "b7b8q");
+        let quiet = score_of(&scored, "e1e2");
+        assert!(
+            promo > quiet,
+            "promotion ({promo}) should outrank quiet king move ({quiet})"
+        );
+    }
+
+    #[test]
+    fn test_score_moves_killers_outrank_history_and_are_ordered() {
+        let pos = pos_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        let moves: Vec<Move> = pos.legal_moves().into_iter().collect();
+
+        let find = |uci: &str| -> Move {
+            moves
+                .iter()
+                .find(|m| m.to_uci(CastlingMode::Standard).to_string() == uci)
+                .copied()
+                .unwrap()
+        };
+
+        let mut ctx = SearchContext::new();
+        // b2b3 becomes the primary killer, a2a3 gets demoted to secondary.
+        ctx.store_killer(0, find("a2a3"));
+        ctx.store_killer(0, find("b2b3"));
+        // Give a third move some history credit.
+        ctx.update_history(&pos, &find("c2c3"), 4);
+
+        let scored = score_moves(&pos, &moves, &ctx, None);
+        let primary = score_of(&scored, "b2b3");
+        let secondary = score_of(&scored, "a2a3");
+        let history = score_of(&scored, "c2c3");
+
+        assert!(
+            primary > secondary,
+            "primary killer ({primary}) must outrank secondary ({secondary})"
+        );
+        assert!(
+            secondary > history,
+            "secondary killer ({secondary}) must outrank history move ({history})"
+        );
+        assert!(history > 0, "history move should score above unseen quiets");
+    }
+
+    // ── Killer / history bookkeeping ─────────────────────────────────
+
+    #[test]
+    fn test_store_killer_shifts_and_dedupes() {
+        let pos = pos_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        let moves: Vec<Move> = pos.legal_moves().into_iter().collect();
+        let a = moves[0];
+        let b = moves[1];
+
+        let mut ctx = SearchContext::new();
+        ctx.store_killer(0, a);
+        assert_eq!(ctx.killers[0][0], Some(a));
+        assert_eq!(ctx.killers[0][1], None);
+
+        // A new killer shifts the old one into the second slot.
+        ctx.store_killer(0, b);
+        assert_eq!(ctx.killers[0][0], Some(b));
+        assert_eq!(ctx.killers[0][1], Some(a));
+
+        // Re-storing the current primary must not displace the secondary.
+        ctx.store_killer(0, b);
+        assert_eq!(ctx.killers[0][0], Some(b));
+        assert_eq!(
+            ctx.killers[0][1],
+            Some(a),
+            "duplicate killer should not push the secondary slot out"
+        );
+    }
+
+    #[test]
+    fn test_store_killer_ignores_out_of_range_ply() {
+        let pos = pos_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        let m = pos.legal_moves().into_iter().next().unwrap();
+        let mut ctx = SearchContext::new();
+        // Must not panic; MAX_PLY is out of bounds for a 0-indexed array.
+        ctx.store_killer(MAX_PLY, m);
+        ctx.store_killer(MAX_PLY + 10, m);
+    }
+
+    #[test]
+    fn test_update_history_accumulates_by_depth_squared() {
+        let pos = pos_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        let m = pos
+            .legal_moves()
+            .into_iter()
+            .find(|m| m.to_uci(CastlingMode::Standard).to_string() == "e2e4")
+            .unwrap();
+
+        let piece = pos.board().piece_at(m.from().unwrap()).unwrap();
+        let pi = piece_index(piece.color, piece.role);
+        let to = m.to() as usize;
+
+        let mut ctx = SearchContext::new();
+        ctx.update_history(&pos, &m, 3);
+        assert_eq!(ctx.history[pi][to], 9, "depth 3 should add 3*3");
+
+        ctx.update_history(&pos, &m, 4);
+        assert_eq!(ctx.history[pi][to], 25, "depth 4 should add a further 4*4");
+    }
+
+    #[test]
+    fn test_update_history_ages_when_saturated() {
+        let pos = pos_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        let m = pos
+            .legal_moves()
+            .into_iter()
+            .find(|m| m.to_uci(CastlingMode::Standard).to_string() == "e2e4")
+            .unwrap();
+
+        let piece = pos.board().piece_at(m.from().unwrap()).unwrap();
+        let pi = piece_index(piece.color, piece.role);
+        let to = m.to() as usize;
+
+        let mut ctx = SearchContext::new();
+        ctx.history[pi][to] = 1_000_000;
+        // An unrelated counter should be halved along with the rest.
+        ctx.history[0][0] = 400;
+
+        ctx.update_history(&pos, &m, 2);
+
+        // 1_000_000 + 4 exceeds the cap, so every counter is halved.
+        assert_eq!(ctx.history[pi][to], 500_002);
+        assert_eq!(ctx.history[0][0], 200, "aging must apply to all counters");
+    }
+
+    // ── Transposition table ──────────────────────────────────────────
+
+    #[test]
+    fn test_tt_probe_rejects_key_collisions() {
+        let mut ctx = SearchContext::new();
+        let key = 0xDEAD_BEEF_u64;
+        ctx.tt_store(key, 5, 42, TTFlag::Exact, None);
+
+        let hit = ctx.tt_probe(key).expect("stored key should be found");
+        assert_eq!(hit.score, 42);
+        assert_eq!(hit.depth, 5);
+        assert_eq!(hit.flag, TTFlag::Exact);
+
+        // A different key mapping to the same slot must not be returned.
+        let colliding = key + (TT_SIZE as u64);
+        assert!(
+            ctx.tt_probe(colliding).is_none(),
+            "probe must verify the full key, not just the slot index"
+        );
+    }
 }

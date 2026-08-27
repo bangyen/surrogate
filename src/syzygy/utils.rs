@@ -13,17 +13,13 @@ use crate::ml::{PhaseEnsemble, SurrogateExplainer};
 
 const SYZYGY_BASE_URL: &str = "http://tablebase.sesse.net/syzygy/3-4-5/";
 
-pub fn download_syzygy(dest_dir: &str) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
-
-    println!("Fetching file list from {}...", SYZYGY_BASE_URL);
-    let resp = client.get(SYZYGY_BASE_URL).send()?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("Failed to fetch file list: {}", resp.status()));
-    }
-
-    let body = resp.text()?;
-    let document = Html::parse_document(&body);
+/// Pull the tablebase filenames out of the directory-listing HTML.
+///
+/// Only `.rtbw` / `.rtbz` links are tablebase data; the listing also
+/// carries navigation links, parent-directory entries and anchors.
+/// Results are sorted and deduplicated so the download order is stable.
+fn parse_tablebase_links(body: &str) -> Vec<String> {
+    let document = Html::parse_document(body);
     let selector = Selector::parse("a").unwrap();
 
     let mut files = Vec::new();
@@ -37,6 +33,20 @@ pub fn download_syzygy(dest_dir: &str) -> Result<()> {
 
     files.sort();
     files.dedup();
+    files
+}
+
+pub fn download_syzygy(dest_dir: &str) -> Result<()> {
+    let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
+
+    println!("Fetching file list from {}...", SYZYGY_BASE_URL);
+    let resp = client.get(SYZYGY_BASE_URL).send()?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("Failed to fetch file list: {}", resp.status()));
+    }
+
+    let body = resp.text()?;
+    let files = parse_tablebase_links(&body);
 
     if files.is_empty() {
         println!("No Syzygy files found to download.");
@@ -176,4 +186,63 @@ pub fn verify_syzygy(
 
     println!("Syzygy verification complete.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_tablebase_links_selects_only_tablebase_files() {
+        // A realistic listing: real tablebase files mixed with the
+        // navigation and checksum links the server also serves.
+        let html = r#"
+            <html><body>
+            <a href="../">Parent Directory</a>
+            <a href="KQvK.rtbw">KQvK.rtbw</a>
+            <a href="KQvK.rtbz">KQvK.rtbz</a>
+            <a href="checksums.md5">checksums.md5</a>
+            <a href="README.txt">README</a>
+            <a href="subdir/">subdir</a>
+            <a>anchor with no href</a>
+            </body></html>
+        "#;
+        assert_eq!(
+            parse_tablebase_links(html),
+            vec!["KQvK.rtbw".to_string(), "KQvK.rtbz".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_tablebase_links_sorts_and_dedupes() {
+        // Servers often list the same file twice (name and icon link).
+        let html = r#"
+            <html><body>
+            <a href="KRvK.rtbz">z</a>
+            <a href="KQvK.rtbw">w</a>
+            <a href="KRvK.rtbz">z again</a>
+            <a href="KBvK.rtbw">b</a>
+            </body></html>
+        "#;
+        assert_eq!(
+            parse_tablebase_links(html),
+            vec![
+                "KBvK.rtbw".to_string(),
+                "KQvK.rtbw".to_string(),
+                "KRvK.rtbz".to_string()
+            ],
+            "links must be sorted and deduplicated for a stable download order"
+        );
+    }
+
+    #[test]
+    fn test_parse_tablebase_links_on_empty_or_junk_input() {
+        // An empty result is what tells the caller there is nothing to do,
+        // so these must not panic or invent entries.
+        assert!(parse_tablebase_links("").is_empty());
+        assert!(parse_tablebase_links("<html><body>no links</body></html>").is_empty());
+        assert!(parse_tablebase_links("not html at all {{{").is_empty());
+        // A near-miss extension must not be mistaken for tablebase data.
+        assert!(parse_tablebase_links(r#"<a href="KQvK.rtbw.tmp">x</a>"#).is_empty());
+    }
 }

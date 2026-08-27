@@ -299,3 +299,170 @@ impl SurrogateExplainer {
         formatted
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ml::model::PhaseModel;
+    use crate::ml::scaler::StandardScaler;
+    use std::collections::BTreeMap;
+
+    /// An explainer whose model has known coefficients, so the expected
+    /// contribution of each feature is arithmetic rather than guesswork.
+    fn explainer_with(names: &[&str], coefficients: Vec<f64>) -> SurrogateExplainer {
+        let mut model = PhaseEnsemble::new(names.iter().map(|s| s.to_string()).collect());
+        model.global_model = Some(PhaseModel {
+            coefficients: Array1::from(coefficients),
+            intercept: 0.0,
+            alpha: 0.1,
+            l1_ratio: 0.5,
+        });
+        SurrogateExplainer::new(model)
+    }
+
+    fn feats(pairs: &[(&str, f32)]) -> BTreeMap<String, f32> {
+        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+    }
+
+    #[test]
+    fn test_get_feature_label_uses_template_stripped_of_markup() {
+        let e = explainer_with(&["material_diff"], vec![1.0]);
+        let label = e.get_feature_label("material_diff");
+        assert!(!label.contains("**"), "markup should be stripped: {label}");
+        assert!(
+            !label.contains("cp)"),
+            "cp placeholder should be gone: {label}"
+        );
+        assert!(label.contains("material advantage"), "got {label}");
+    }
+
+    #[test]
+    fn test_get_feature_label_falls_back_to_title_case() {
+        let e = explainer_with(&["x"], vec![1.0]);
+        // Unknown features become readable rather than raw snake_case.
+        assert_eq!(e.get_feature_label("rook_on_7th_them"), "Rook On 7th Them");
+        assert_eq!(e.get_feature_label(""), "");
+    }
+
+    #[test]
+    fn test_explain_move_ranks_by_absolute_contribution() {
+        let e = explainer_with(
+            &["material_diff", "mobility_us", "king_safety_us"],
+            vec![1.0, 1.0, 1.0],
+        );
+        // Contributions are coefficient * feature: 5, -50, 20.
+        let f = feats(&[
+            ("material_diff", 5.0),
+            ("mobility_us", -50.0),
+            ("king_safety_us", 20.0),
+        ]);
+
+        let reasons = e.explain_move(&f, 5, 0.05);
+        let order: Vec<&str> = reasons.iter().map(|(n, _, _)| n.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["mobility_us", "king_safety_us", "material_diff"],
+            "largest magnitude first, regardless of sign"
+        );
+        assert_eq!(reasons[0].1, -50.0);
+    }
+
+    #[test]
+    fn test_explain_move_respects_top_k() {
+        let e = explainer_with(&["a", "b", "c"], vec![1.0, 1.0, 1.0]);
+        let f = feats(&[("a", 30.0), ("b", 20.0), ("c", 10.0)]);
+
+        let reasons = e.explain_move(&f, 2, 0.05);
+        assert_eq!(reasons.len(), 2);
+        assert_eq!(reasons[0].0, "a");
+        assert_eq!(reasons[1].0, "b");
+
+        // top_k of 0 yields nothing at all.
+        assert!(e.explain_move(&f, 0, 0.05).is_empty());
+    }
+
+    #[test]
+    fn test_explain_move_filters_below_min_cp() {
+        let e = explainer_with(&["a", "b"], vec![1.0, 1.0]);
+        let f = feats(&[("a", 100.0), ("b", 1.0)]);
+
+        // A threshold above the weaker contribution drops it entirely.
+        let reasons = e.explain_move(&f, 5, 10.0);
+        assert_eq!(reasons.len(), 1, "only the strong contribution survives");
+        assert_eq!(reasons[0].0, "a");
+
+        // A threshold above everything yields no explanation.
+        assert!(e.explain_move(&f, 5, 1000.0).is_empty());
+    }
+
+    #[test]
+    fn test_explain_move_handles_missing_features() {
+        let e = explainer_with(&["a", "missing"], vec![1.0, 5.0]);
+        // "missing" is absent from the map and must default to 0, not panic.
+        let reasons = e.explain_move(&feats(&[("a", 42.0)]), 5, 0.05);
+        assert_eq!(reasons.len(), 1);
+        assert_eq!(reasons[0].0, "a");
+    }
+
+    #[test]
+    fn test_explain_move_applies_the_scaler() {
+        let mut model = PhaseEnsemble::new(vec!["a".to_string()]);
+        model.global_model = Some(PhaseModel {
+            coefficients: Array1::from(vec![1.0]),
+            intercept: 0.0,
+            alpha: 0.1,
+            l1_ratio: 0.5,
+        });
+        let mut scaler = StandardScaler::new(1);
+        scaler.mean = Array1::from(vec![10.0]);
+        scaler.scale = Array1::from(vec![2.0]);
+        model.scaler = Some(scaler);
+
+        let e = SurrogateExplainer::new(model);
+        // (30 - 10) / 2 * 1.0 = 10
+        let reasons = e.explain_move(&feats(&[("a", 30.0)]), 5, 0.05);
+        assert_eq!(reasons[0].1, 10.0);
+    }
+
+    #[test]
+    fn test_explain_move_without_a_model_is_empty() {
+        // A bare ensemble has no coefficients, so nothing can be claimed.
+        let e = SurrogateExplainer::new(PhaseEnsemble::new(vec!["a".to_string()]));
+        assert!(e.explain_move(&feats(&[("a", 99.0)]), 5, 0.05).is_empty());
+    }
+
+    #[test]
+    fn test_explanation_text_carries_the_cp_value() {
+        let e = explainer_with(&["material_diff"], vec![1.0]);
+        let reasons = e.explain_move(&feats(&[("material_diff", 250.0)]), 5, 0.05);
+        let (_, cp, text) = &reasons[0];
+        assert_eq!(*cp, 250.0);
+        assert!(
+            text.contains("+250"),
+            "explanation should quote the cp value, got: {text}"
+        );
+        assert!(
+            !text.contains("{:+.0}"),
+            "placeholder left unfilled: {text}"
+        );
+    }
+
+    #[test]
+    fn test_get_formatted_features_sorts_by_magnitude() {
+        let e = explainer_with(&["a"], vec![1.0]);
+        let out = e.get_formatted_features(&feats(&[
+            ("material_diff", 1.0),
+            ("mobility_us", -9.0),
+            ("king_safety_us", 4.0),
+        ]));
+        let order: Vec<&str> = out.iter().map(|(n, _, _)| n.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["mobility_us", "king_safety_us", "material_diff"]
+        );
+        // Every entry carries a human-readable label alongside the raw name.
+        for (name, label, _) in &out {
+            assert!(!label.is_empty(), "no label for {name}");
+        }
+    }
+}
