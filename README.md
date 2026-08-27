@@ -5,7 +5,7 @@ A high-performance chess engine with integrated ML-driven move explanations, bui
 [![License](https://img.shields.io/github/license/bangyen/chess)](LICENSE)
 [![CI](https://github.com/bangyen/chess/actions/workflows/ci.yml/badge.svg)](https://github.com/bangyen/chess/actions/workflows/ci.yml)
 
-**Chess AI Explainability: 86.7% decisive faithfulness, 2.5 sparsity explanations, 100% position coverage with a native Rust inference engine.**
+**A chess engine that explains its moves — and measures how honest those explanations are.**
 
 <p align="center">
   <img src="docs/audit-demo.gif" alt="Demo preview" width="600">
@@ -27,21 +27,24 @@ cd chess
 just build
 ```
 
-The surrogate model is not checked in, so train it once before running
-anything that produces explanations:
+A pretrained `model.json` is checked in, so the explanation commands work on
+a fresh clone. Retrain it whenever the features or trainer change:
 
 ```bash
-just train --n-positions 100
+just train --n-positions 200
 ```
-
-This writes `model.json`. Without it, `just audit` still reports extracted
-features and the engine's recommendation, but skips the ML explanations.
 
 ### Usage Options
 
 **CLI Tools:**
 ```bash
-# Run feature explainability audit on the starting position
+# Measure explainability metrics and write audit-results.json
+just metrics
+
+# Verify a committed report still meets its targets
+just metrics-check
+
+# Inspect features and explanations for the starting position
 just audit
 
 # ...or on a specific position
@@ -60,13 +63,32 @@ just web
 
 ## Results
 
-| Metric | Value | Target |
-|--------|-------|--------|
-| Decisive Faithfulness | **86.7%** | ≥80.0% |
-| Explanation Sparsity | **2.5** | ≤4.0 |
-| Position Coverage | **100%** | ≥70.0% |
-| Move Ranking (τ) | **0.52** | ≥0.45 |
-| Fidelity (Delta-R²) | **0.48** | ≥0.35 |
+Measured over 98 sampled positions at depth 12 by `just metrics`, against a
+surrogate model trained on 200 positions. Regenerate with `just metrics`;
+verify a committed report with `just metrics-check`.
+
+| Metric | Value | Target | |
+|--------|-------|--------|---|
+| Decisive Faithfulness | **0.800** | ≥ 0.80 | ✅ |
+| Position Coverage | **1.000** | ≥ 0.70 | ✅ |
+| Explanation Sparsity | **9.49** | ≤ 4.0 | ❌ |
+| Move Ranking (τ) | **0.299** | ≥ 0.45 | ❌ |
+| Fidelity (R²) | **-0.015** | ≥ 0.35 | ❌ |
+
+**Reading these honestly:** the surrogate agrees with the engine about which
+of two clearly-separated moves is better 80% of the time, and almost always
+has more than one feature to point at. It is *not* yet a faithful model of
+the engine's evaluation: an R² near zero means it predicts about as well as
+guessing the mean, and explanations currently lean on ~9 features where a
+readable one would use 3–4.
+
+These numbers replace an earlier table that reported 86.7% faithfulness and
+R² 0.48. That table was inherited from a Python predecessor whose measurement
+code did not survive the Rust rewrite — it described a gradient-boosted model
+over an enriched featureset, scored on a held-out split of its own training
+sample. The current pipeline is a linear model over plain features, audited
+against freshly sampled positions, so the two are not comparable. The
+numbers above are what this code actually produces.
 
 ## Features
 
@@ -99,7 +121,8 @@ chess/
 
 - ✅ Continuous test coverage monitoring (`just test`)
 - ✅ Zero-warning builds (`just lint`)
-- ✅ Reproducible seeds for ML training
+- ✅ Explainability metrics measured, not asserted (`just metrics`)
+- ✅ Metric regressions fail the build (`just metrics-check`)
 
 ## License
 
