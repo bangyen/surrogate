@@ -143,6 +143,54 @@ mod tests {
     }
 
     #[test]
+    fn test_see_threat_features_detect_material_at_stake() {
+        // White rook on d1 can take an undefended rook on d8: an even
+        // trade that wins material outright because nothing recaptures.
+        let feats = extract_features(&pos_from_fen("3r2k1/8/8/8/8/8/8/3RK3 w - - 0 1"));
+        assert!(
+            get(&feats, "see_best_capture") > 0.0,
+            "a winning capture should register: {}",
+            get(&feats, "see_best_capture")
+        );
+
+        // Quiet position with nothing to take.
+        let quiet = extract_features(&pos_from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1"));
+        assert_eq!(get(&quiet, "see_best_capture"), 0.0);
+        assert_eq!(get(&quiet, "see_worst_threat"), 0.0);
+    }
+
+    #[test]
+    fn test_see_worst_threat_sees_the_opponents_reply() {
+        // Black queen attacks the undefended white queen on d5; it is
+        // White to move, so this is a threat rather than a capture.
+        let feats = extract_features(&pos_from_fen("3qk3/8/8/3Q4/8/8/8/4K3 w - - 0 1"));
+        assert!(
+            get(&feats, "see_worst_threat") > 0.0,
+            "an incoming capture should register: {}",
+            get(&feats, "see_worst_threat")
+        );
+    }
+
+    #[test]
+    fn test_hanging_value_weighs_pieces_by_worth() {
+        // A loose queen is worth far more than a loose pawn, which the
+        // existing count of hanging pieces cannot express.
+        let queen = extract_features(&pos_from_fen("r3k3/8/8/8/8/8/Q7/4K3 w - - 0 1"));
+        let pawn = extract_features(&pos_from_fen("r3k3/8/8/8/8/8/P7/4K3 w - - 0 1"));
+        // The white piece on a2 is attacked down the open a-file by the
+        // rook on a8 and undefended; swapping a queen for a pawn changes
+        // only how much material is at stake.
+        assert!(
+            get(&queen, "hanging_value_us") > get(&pawn, "hanging_value_us"),
+            "queen {} should outweigh pawn {}",
+            get(&queen, "hanging_value_us"),
+            get(&pawn, "hanging_value_us")
+        );
+        assert_eq!(get(&queen, "hanging_value_us"), 900.0);
+        assert_eq!(get(&pawn, "hanging_value_us"), 100.0);
+    }
+
+    #[test]
     fn test_all_features_are_finite() {
         // NaN or infinity here would silently poison model training.
         for fen in [
