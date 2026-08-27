@@ -463,3 +463,135 @@ pub async fn start_server(stockfish_path: String, host: String, port: u16) -> Re
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ml::model::PhaseModel;
+    use ndarray::Array1;
+
+    fn state_from_fen(fen: &str) -> GameState {
+        let mut s = GameState::new("stockfish".to_string());
+        s.board = fen
+            .parse::<shakmaty::fen::Fen>()
+            .unwrap()
+            .into_position(shakmaty::CastlingMode::Standard)
+            .unwrap();
+        s
+    }
+
+    #[test]
+    fn test_board_state_reports_start_position() {
+        let s = GameState::new("stockfish".to_string());
+        let bs = get_board_state(&s);
+
+        assert!(bs.fen.starts_with("rnbqkbnr/pppppppp"));
+        assert_eq!(bs.turn, "white");
+        assert!(!bs.is_game_over);
+        assert!(bs.result.is_none());
+        assert_eq!(bs.legal_moves.len(), 20, "20 opening moves");
+        assert!(bs.legal_moves.contains(&"e2e4".to_string()));
+    }
+
+    #[test]
+    fn test_board_state_reports_turn_from_the_position() {
+        let s = state_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1");
+        assert_eq!(get_board_state(&s).turn, "black");
+    }
+
+    #[test]
+    fn test_board_state_reports_checkmate_as_game_over() {
+        // Fool's mate: Black has delivered mate, White has no legal move.
+        let s = state_from_fen("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3");
+        let bs = get_board_state(&s);
+
+        assert!(bs.is_game_over, "checkmate should end the game");
+        assert!(bs.result.is_some(), "a finished game must report a result");
+        assert!(bs.legal_moves.is_empty(), "no legal moves when mated");
+    }
+
+    #[test]
+    fn test_board_state_reports_stalemate_as_game_over() {
+        let s = state_from_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
+        let bs = get_board_state(&s);
+        assert!(bs.is_game_over, "stalemate should end the game");
+        assert!(bs.legal_moves.is_empty());
+    }
+
+    #[test]
+    fn test_board_state_serializes_for_the_api() {
+        // The dashboard consumes these field names; renaming one silently
+        // breaks the front end.
+        let s = GameState::new("stockfish".to_string());
+        let json = serde_json::to_value(get_board_state(&s)).unwrap();
+
+        for key in ["fen", "legal_moves", "is_game_over", "result", "turn"] {
+            assert!(json.get(key).is_some(), "response is missing `{key}`");
+        }
+        assert!(json["legal_moves"].is_array());
+    }
+
+    #[test]
+    fn test_reset_restores_the_start_position_and_clears_history() {
+        let mut s = state_from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1");
+        s.history.push("e2e4".to_string());
+
+        s.reset();
+
+        assert_eq!(get_board_state(&s).legal_moves.len(), 20);
+        assert!(s.history.is_empty(), "history must not survive a reset");
+    }
+
+    #[test]
+    fn test_reset_preserves_engine_configuration() {
+        // Resetting the board must not discard the loaded model or the
+        // configured engine path; only game progress is cleared.
+        let mut s = GameState::new("/custom/stockfish".to_string());
+        s.model_ready = true;
+        s.history.push("e2e4".to_string());
+
+        s.reset();
+
+        assert_eq!(s.stockfish_path, "/custom/stockfish");
+        assert!(s.model_ready, "model readiness should survive a reset");
+    }
+
+    #[test]
+    fn test_generate_explanation_without_a_model_is_none() {
+        let s = GameState::new("stockfish".to_string());
+        let m = s.board.legal_moves().into_iter().next().unwrap();
+        assert!(generate_explanation(&s, m).is_none());
+    }
+
+    #[test]
+    fn test_generate_explanation_formats_reasons_as_bullets() {
+        // A capture, so material_diff actually moves off zero; a quiet
+        // move in a symmetric position contributes nothing and is filtered.
+        let mut s = state_from_fen("4k3/8/8/3q4/4P3/8/8/4K3 w - - 0 1");
+        let mut model = PhaseEnsemble::new(vec!["material_diff".to_string()]);
+        model.global_model = Some(PhaseModel {
+            coefficients: Array1::from(vec![100.0]),
+            intercept: 0.0,
+            alpha: 0.1,
+            l1_ratio: 0.5,
+        });
+        s.model = Some(model);
+
+        let m = s
+            .board
+            .legal_moves()
+            .into_iter()
+            .find(|m| {
+                shakmaty::uci::UciMove::from_move(*m, shakmaty::CastlingMode::Standard).to_string()
+                    == "e4d5"
+            })
+            .unwrap();
+
+        let text = generate_explanation(&s, m).expect("a model should produce an explanation");
+        assert!(text.starts_with("- "), "reasons should be bulleted: {text}");
+        assert!(
+            text.lines().count() <= 3,
+            "explanations are capped at 3 reasons, got: {text}"
+        );
+    }
+}

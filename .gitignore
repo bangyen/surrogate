@@ -3,7 +3,6 @@ target/
 *.so
 *.dylib
 *.dll
-*.txt
 
 # Model artifacts
 model.json
@@ -25,3 +24,4 @@ profile_output*.txt
 
 # Mutation testing
 mutants/
+mutants.out*/

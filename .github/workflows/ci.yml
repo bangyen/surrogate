@@ -19,6 +19,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
       - name: Install Stockfish
         run: |
           sudo apt-get update
@@ -26,6 +28,6 @@ jobs:
       - name: Format Check
         run: cargo fmt --all -- --check
       - name: Lint (Clippy)
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test

@@ -3,7 +3,7 @@
 A high-performance chess engine with integrated ML-driven move explanations, built entirely in Rust.
 
 [![License](https://img.shields.io/github/license/bangyen/chess)](LICENSE)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](rust/)
+[![CI](https://github.com/bangyen/chess/actions/workflows/ci.yml/badge.svg)](https://github.com/bangyen/chess/actions/workflows/ci.yml)
 
 **Chess AI Explainability: 86.7% decisive faithfulness, 2.5 sparsity explanations, 100% position coverage with a native Rust inference engine.**
 
@@ -27,12 +27,25 @@ cd chess
 just build
 ```
 
+The surrogate model is not checked in, so train it once before running
+anything that produces explanations:
+
+```bash
+just train --n-positions 100
+```
+
+This writes `model.json`. Without it, `just audit` still reports extracted
+features and the engine's recommendation, but skips the ML explanations.
+
 ### Usage Options
 
 **CLI Tools:**
 ```bash
-# Run feature explainability audit
-just audit --positions 100
+# Run feature explainability audit on the starting position
+just audit
+
+# ...or on a specific position
+just audit --fen "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 0 1"
 
 # Play interactive chess with explanations
 just play
@@ -68,7 +81,8 @@ just web
 ```plaintext
 chess/
 ├── src/
-│   ├── engine/       # Stockfish interface and engine wrapper
+│   ├── engine/       # Native alpha-beta search, evaluation, SEE, Zobrist
+│   │                 #   hashing, plus the Stockfish UCI interface
 │   ├── features/     # High-performance feature extraction
 │   ├── ml/           # Native ML model (Surrogate Model)
 │   ├── web_server.rs # Axum web dashboard server
