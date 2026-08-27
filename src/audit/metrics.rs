@@ -81,6 +81,41 @@ pub fn r2_score(y_true: &[f64], y_pred: &[f64]) -> f64 {
     1.0 - ss_res / ss_tot
 }
 
+/// Coefficient of determination measured *within* each group.
+///
+/// The surrogate is fit to the differences between candidate moves from
+/// one position, not to absolute evaluation levels, so scoring it on
+/// levels would measure something it never claimed to model.  Each
+/// group is centred on its own mean before the comparison, which is the
+/// same transformation the trainer applies.
+///
+/// Returns 0.0 when no group carries any within-group variance.
+pub fn within_group_r2(groups: &[(Vec<f64>, Vec<f64>)]) -> f64 {
+    let mut ss_tot = 0.0;
+    let mut ss_res = 0.0;
+
+    for (observed, predicted) in groups {
+        if observed.len() < 2 || observed.len() != predicted.len() {
+            continue;
+        }
+        let n = observed.len() as f64;
+        let obs_mean = observed.iter().sum::<f64>() / n;
+        let pred_mean = predicted.iter().sum::<f64>() / n;
+
+        for (o, p) in observed.iter().zip(predicted) {
+            let centred_obs = o - obs_mean;
+            let centred_pred = p - pred_mean;
+            ss_tot += centred_obs.powi(2);
+            ss_res += (centred_obs - centred_pred).powi(2);
+        }
+    }
+
+    if ss_tot.abs() < 1e-12 {
+        return 0.0;
+    }
+    1.0 - ss_res / ss_tot
+}
+
 /// Number of features needed to reach 80% of the total absolute
 /// contribution — the "sparsity" of an explanation.
 ///
@@ -194,6 +229,39 @@ mod tests {
         let r2 = r2_score(&[5.0, 5.0, 5.0], &[5.0, 5.0, 5.0]);
         assert!(r2.is_finite(), "R² must not be NaN");
         assert_eq!(r2, 0.0);
+    }
+
+    #[test]
+    fn test_within_group_r2_ignores_group_level_offsets() {
+        // Predictions that track the within-group pattern perfectly but
+        // sit at a wholly different level must still score 1.0: the
+        // surrogate models differences, not levels.
+        let groups = vec![
+            (vec![10.0, 20.0, 30.0], vec![1010.0, 1020.0, 1030.0]),
+            (vec![5.0, 15.0], vec![-995.0, -985.0]),
+        ];
+        assert!((within_group_r2(&groups) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_within_group_r2_penalises_wrong_ordering() {
+        // Correct level, reversed within-group pattern.
+        let groups = vec![(vec![10.0, 20.0, 30.0], vec![30.0, 20.0, 10.0])];
+        assert!(
+            within_group_r2(&groups) < 0.0,
+            "an inverted ordering must score below zero"
+        );
+    }
+
+    #[test]
+    fn test_within_group_r2_degenerate_inputs() {
+        assert_eq!(within_group_r2(&[]), 0.0);
+        // Single-element groups carry no within-group variance.
+        assert_eq!(within_group_r2(&[(vec![5.0], vec![9.0])]), 0.0);
+        // A group where every observation is identical contributes none.
+        assert_eq!(within_group_r2(&[(vec![7.0, 7.0], vec![1.0, 2.0])]), 0.0);
+        // Mismatched lengths are skipped rather than panicking.
+        assert_eq!(within_group_r2(&[(vec![1.0, 2.0], vec![1.0])]), 0.0);
     }
 
     #[test]
