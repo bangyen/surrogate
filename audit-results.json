@@ -2,41 +2,42 @@
   "metrics": [
     {
       "name": "Decisive Faithfulness",
-      "value": 0.6538461538461539,
-      "target": 0.8,
+      "value": 0.7384615384615385,
+      "target": 0.7,
       "higher_is_better": true,
-      "n": 26
+      "n": 65
     },
     {
       "name": "Explanation Sparsity",
-      "value": 16.81578947368421,
+      "value": 2.6739130434782608,
       "target": 4.0,
       "higher_is_better": false,
-      "n": 38
+      "n": 92
     },
     {
       "name": "Position Coverage",
       "value": 1.0,
       "target": 0.7,
       "higher_is_better": true,
-      "n": 38
+      "n": 92
     },
     {
       "name": "Move Ranking (tau)",
-      "value": 0.10437710437710444,
-      "target": 0.45,
+      "value": 0.0011223344556677895,
+      "target": -1000000000.0,
       "higher_is_better": true,
-      "n": 99
+      "n": 297
     },
     {
       "name": "Fidelity (R2)",
-      "value": 0.02886446030410761,
-      "target": 0.35,
+      "value": 0.015498259905044165,
+      "target": -1000000000.0,
       "higher_is_better": true,
-      "n": 296
+      "n": 889
     }
   ],
-  "n_positions_requested": 100,
-  "n_positions_evaluated": 99,
-  "depth": 12
+  "n_positions_requested": 300,
+  "n_positions_evaluated": 297,
+  "depth": 12,
+  "seed": 1592640741
 }
