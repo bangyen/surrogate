@@ -78,6 +78,14 @@ enum SyzygyAction {
     },
 }
 
+/// Expand a leading `~/` to the user's home directory.
+fn expand_home(path: &str) -> Result<String> {
+    match path.strip_prefix("~/") {
+        Some(rest) => Ok(format!("{}/{}", std::env::var("HOME")?, rest)),
+        None => Ok(path.to_string()),
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -194,26 +202,16 @@ fn main() -> Result<()> {
         }
         Commands::Syzygy { action } => match action {
             SyzygyAction::Download { dest } => {
-                let expanded_dest = if dest.starts_with("~/") {
-                    dest.replace("~", &std::env::var("HOME")?)
-                } else {
-                    dest
-                };
-                chess_ai_rust::syzygy_utils::download_syzygy(&expanded_dest)?;
+                chess_ai_rust::syzygy_utils::download_syzygy(&expand_home(&dest)?)?;
             }
             SyzygyAction::Verify {
                 stockfish_path,
                 syzygy_path,
                 model_path,
             } => {
-                let expanded_path = if syzygy_path.starts_with("~/") {
-                    syzygy_path.replace("~", &std::env::var("HOME")?)
-                } else {
-                    syzygy_path
-                };
                 chess_ai_rust::syzygy_utils::verify_syzygy(
                     &stockfish_path,
-                    &expanded_path,
+                    &expand_home(&syzygy_path)?,
                     Some(&model_path),
                 )?;
             }
