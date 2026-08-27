@@ -25,6 +25,18 @@ web:
 build:
     cargo build --release
 
+# build the browser demo (WebAssembly)
+wasm:
+    wasm-pack build --target web --out-dir web/pkg --release -- \
+        --no-default-features --features wasm
+    cp model.json web/model.json
+    @echo "Built. Serve with: just demo"
+
+# serve the browser demo locally
+demo: 
+    @echo "Open http://localhost:8000/demo.html"
+    cd web && python3 -m http.server 8000
+
 # train the surrogate model (Rust-native)
 train *ARGS:
     {{RUN}} train {{ARGS}}

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explainable Chess Engine — Browser Demo</title>
+<link rel="stylesheet" href="static/css/style.css">
+<style>
+  /* Layout for the standalone demo; the shared stylesheet handles the
+     board, typography and colour tokens. */
+  .demo-wrap { max-width: 1080px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  .demo-head { margin-bottom: 1.25rem; }
+  .demo-head h1 { margin: 0 0 .35rem; font-size: 1.5rem; }
+  .demo-head p { margin: 0; opacity: .75; font-size: .95rem; line-height: 1.5; }
+  .demo-grid { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1.25rem; align-items: start; }
+  @media (max-width: 860px) { .demo-grid { grid-template-columns: minmax(0, 1fr); } }
+  .panel { border: 1px solid rgba(128,128,128,.25); border-radius: .6rem; padding: .9rem 1rem; margin-bottom: 1rem; }
+  .panel h2 { margin: 0 0 .6rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; opacity: .65; }
+  .controls { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .controls select, .controls button { padding: .4rem .7rem; border-radius: .4rem; border: 1px solid rgba(128,128,128,.35); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .controls button:disabled { opacity: .45; cursor: default; }
+  #status { margin-top: .6rem; font-size: .9rem; min-height: 1.3em; }
+  #reasons { margin: 0; padding-left: 1.1rem; font-size: .92rem; line-height: 1.55; }
+  #reasons li { margin-bottom: .3rem; }
+  .muted { opacity: .6; font-size: .9rem; }
+  .metric-row { display: flex; justify-content: space-between; font-size: .9rem; padding: .18rem 0; }
+  .metric-row span:last-child { font-variant-numeric: tabular-nums; }
+  .note { font-size: .82rem; opacity: .65; line-height: 1.5; margin-top: .5rem; }
+  canvas { width: 100%; height: auto; display: block; }
+</style>
+</head>
+<body>
+<div class="demo-wrap">
+  <div class="demo-head">
+    <h1>Explainable Chess Engine</h1>
+    <p>
+      A Rust alpha-beta engine compiled to WebAssembly, running entirely in this
+      page — no server, no Stockfish. Play a move and the surrogate model says
+      why it liked the reply.
+    </p>
+  </div>
+
+  <div class="demo-grid">
+    <div>
+      <div class="panel">
+        <div class="controls">
+          <label for="variant" class="muted">Variant</label>
+          <select id="variant"></select>
+          <label for="depth" class="muted">Depth</label>
+          <select id="depth">
+            <option value="2">2 (instant)</option>
+            <option value="3" selected>3 (fast)</option>
+            <option value="4">4</option>
+            <option value="5">5 (slow)</option>
+          </select>
+          <button id="new-game">New game</button>
+        </div>
+        <div id="status">Loading engine…</div>
+      </div>
+      <div class="panel">
+        <canvas id="board"></canvas>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Why the engine played that</h2>
+        <ul id="reasons"><li class="muted">Make a move to see the engine's reasoning.</li></ul>
+        <p class="note" id="explain-note"></p>
+      </div>
+      <div class="panel">
+        <h2>Position</h2>
+        <div class="metric-row"><span>Evaluation</span><span id="eval">—</span></div>
+        <div class="metric-row"><span>Side to move</span><span id="turn">—</span></div>
+        <div class="metric-row"><span>Legal moves</span><span id="nmoves">—</span></div>
+      </div>
+      <div class="panel">
+        <h2>About</h2>
+        <p class="note">
+          The opponent is this project's own search, not Stockfish — a browser
+          cannot spawn one. The surrogate model was trained offline against
+          Stockfish and ships as a JSON asset, so explanations reflect what it
+          learned there. Explanations cover standard chess only; the variants
+          use the same search but have no trained model.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="static/js/chess.js"></script>
+<script type="module">
+import init, { WasmGame, supportedVariants } from './pkg/chess_ai_rust.js';
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status');
+const reasonsEl = $('reasons');
+
+let game = null;
+let board = null;
+let busy = false;
+
+function setStatus(text) { statusEl.textContent = text; }
+
+function setReasons(lines, fallback) {
+  reasonsEl.innerHTML = '';
+  if (!lines || lines.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'muted';
+    li.textContent = fallback;
+    reasonsEl.appendChild(li);
+    return;
+  }
+  for (const line of lines) {
+    const li = document.createElement('li');
+    // Reasons arrive as markdown-ish text with **bold** spans.
+    li.innerHTML = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    reasonsEl.appendChild(li);
+  }
+}
+
+function refresh() {
+  const fen = game.fen();
+  board.setPosition(fen.split(' ')[0]);
+  board.setLegalMoves(game.legalMoves());
+  $('eval').textContent = `${game.evaluate() > 0 ? '+' : ''}${game.evaluate()} cp`;
+  $('turn').textContent = game.turn();
+  $('nmoves').textContent = game.legalMoves().length;
+}
+
+async function onPlayerMove(uci) {
+  if (busy || game.isGameOver()) return;
+  if (!game.legalMoves().includes(uci)) return;
+
+  busy = true;
+  try {
+    game.playMove(uci);
+    refresh();
+
+    if (game.isGameOver()) { setStatus('Game over.'); return; }
+
+    setStatus('Engine is thinking…');
+    // Yield so the board repaints before the search blocks the thread.
+    await new Promise((r) => setTimeout(r, 20));
+
+    const depth = parseInt($('depth').value, 10);
+    const reply = game.searchMove(depth);
+    if (!reply) { setStatus('Game over.'); return; }
+
+    // Explain the move from the position it is played in, before applying it.
+    let text = '';
+    if (game.hasModel()) {
+      try { text = game.explain(reply); } catch (e) { console.warn(e); }
+    }
+
+    game.playMove(reply);
+    refresh();
+    setStatus(`Engine played ${reply}.`);
+
+    if (game.hasModel()) {
+      setReasons(text ? text.split('\n').filter(Boolean) : null,
+                 'No feature stood out above the noise floor for that move.');
+    } else {
+      setReasons(null, 'Model not loaded — explanations unavailable.');
+    }
+  } catch (err) {
+    setStatus(`Error: ${err}`);
+  } finally {
+    busy = false;
+    if (game.isGameOver()) setStatus('Game over.');
+  }
+}
+
+async function newGame() {
+  const variant = $('variant').value;
+  game = new WasmGame(variant);
+
+  if (modelJson) {
+    try { game.loadModel(modelJson); } catch (e) { console.warn('model load failed', e); }
+  }
+  $('explain-note').textContent = variant === 'standard'
+    ? ''
+    : 'Explanations are standard-chess only; this variant has no trained model.';
+
+  refresh();
+  setReasons(null, 'Make a move to see the engine’s reasoning.');
+  setStatus(game.hasModel() ? 'Your move — you play White.' : 'Your move (no model loaded).');
+}
+
+let modelJson = null;
+
+(async () => {
+  try {
+    await init();
+  } catch (e) {
+    setStatus('Failed to load the engine. See the console for details.');
+    throw e;
+  }
+
+  const sel = $('variant');
+  for (const row of supportedVariants()) {
+    const [slug, desc] = row.split('\t');
+    const opt = document.createElement('option');
+    opt.value = slug;
+    opt.textContent = `${slug} — ${desc}`;
+    sel.appendChild(opt);
+  }
+
+  // The model is optional: without it the engine still plays.
+  try {
+    const res = await fetch('model.json');
+    if (res.ok) modelJson = await res.text();
+  } catch (e) {
+    console.warn('model.json not available', e);
+  }
+
+  board = new ChessBoard('board');
+  board.onMove = onPlayerMove;
+
+  $('new-game').addEventListener('click', newGame);
+  $('variant').addEventListener('change', newGame);
+
+  await newGame();
+})();
+</script>
+</body>
+</html>

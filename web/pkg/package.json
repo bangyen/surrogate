@@ -1,0 +1,15 @@
+{
+  "name": "chess_ai_rust",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "chess_ai_rust_bg.wasm",
+    "chess_ai_rust.js",
+    "chess_ai_rust.d.ts"
+  ],
+  "main": "chess_ai_rust.js",
+  "types": "chess_ai_rust.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

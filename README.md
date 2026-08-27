@@ -60,10 +60,20 @@ just variant antichess
 
 **Web Interface:**
 ```bash
-# Launch the Axum-based web dashboard
+# Launch the Axum-based web dashboard (needs Stockfish)
 just web
 # Then open http://localhost:5000
+
+# ...or build the browser demo, which needs nothing but a browser
+just wasm
+just demo
 ```
+
+The browser demo compiles the engine, feature extraction and ML inference
+to WebAssembly and runs them in the page — no server, no Stockfish. The
+opponent is this project's own alpha-beta search, and the surrogate model
+ships as a JSON asset, so explanations work offline. It deploys to GitHub
+Pages on every push to `main`.
 
 ## Results
 
