@@ -3,10 +3,10 @@
 A chess engine that explains its moves in named features and centipawns — and
 measures how faithful those explanations actually are.
 
-[![CI](https://github.com/bangyen/chess/actions/workflows/ci.yml/badge.svg)](https://github.com/bangyen/chess/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/bangyen/chess)](LICENSE)
+[![CI](https://github.com/bangyen/surrogate/actions/workflows/ci.yml/badge.svg)](https://github.com/bangyen/surrogate/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/bangyen/surrogate)](LICENSE)
 
-**[▶ Play it in your browser](https://bangyen.github.io/chess/demo.html)** — the
+**[▶ Play it in your browser](https://bangyen.github.io/surrogate/demo.html)** — the
 engine is compiled to WebAssembly and runs entirely in the page. No install, no
 server, no Stockfish.
 
@@ -59,7 +59,7 @@ build. [Full results and methodology ↓](#results)
 ### Installation
 
 ```bash
-git clone https://github.com/bangyen/chess.git
+git clone https://github.com/bangyen/surrogate.git
 cd chess
 just build
 ```
