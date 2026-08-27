@@ -33,6 +33,14 @@ train *ARGS:
 audit *ARGS:
     {{RUN}} audit {{ARGS}}
 
+# measure explainability metrics and write audit-results.json
+metrics *ARGS:
+    {{RUN}} metrics {{ARGS}}
+
+# verify committed metrics still meet their targets
+metrics-check:
+    {{RUN}} metrics --check
+
 # play an interactive game (Rust-native)
 play:
     {{RUN}} play

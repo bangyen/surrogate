@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod engine;
 pub mod features;
 pub mod ml;
