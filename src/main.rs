@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chess_ai_rust::audit::{run_audit, AuditConfig, AuditReport};
 use chess_ai_rust::engine::ExplainableEngine;
 use chess_ai_rust::features::extract_features;
 use chess_ai_rust::ml::{train_surrogate_model, PhaseEnsemble, SurrogateExplainer};
@@ -32,6 +33,23 @@ enum Commands {
         fen: Option<String>,
         #[arg(short, long, default_value = "model.json")]
         model_path: String,
+    },
+    /// Measure explainability metrics over sampled positions
+    Metrics {
+        #[arg(short, long, default_value = "stockfish")]
+        stockfish_path: String,
+        #[arg(short, long, default_value = "model.json")]
+        model_path: String,
+        #[arg(short, long, default_value_t = 100)]
+        n_positions: usize,
+        #[arg(short, long, default_value_t = 12)]
+        depth: u32,
+        /// Write the report here (defaults to audit-results.json)
+        #[arg(short, long, default_value = "audit-results.json")]
+        out: String,
+        /// Compare against the committed report and fail on regressions
+        #[arg(long)]
+        check: bool,
     },
     /// Train the surrogate model
     Train {
@@ -175,6 +193,80 @@ fn main() -> Result<()> {
                     model_path
                 );
             }
+        }
+        Commands::Metrics {
+            stockfish_path,
+            model_path,
+            n_positions,
+            depth,
+            out,
+            check,
+        } => {
+            if !Path::new(&model_path).exists() {
+                return Err(anyhow::anyhow!(
+                    "Model not found at {}. Run `just train` first.",
+                    model_path
+                ));
+            }
+            let model: PhaseEnsemble =
+                serde_json::from_str(&std::fs::read_to_string(&model_path)?)?;
+
+            if check {
+                // Verify the committed report rather than re-measuring:
+                // a check should be fast and deterministic.
+                if !Path::new(&out).exists() {
+                    return Err(anyhow::anyhow!(
+                        "No report at {}. Run `just metrics` to generate one.",
+                        out
+                    ));
+                }
+                let report: AuditReport = serde_json::from_str(&std::fs::read_to_string(&out)?)?;
+                println!("{}", report.to_markdown());
+
+                let failures = report.failures();
+                if failures.is_empty() {
+                    println!(
+                        "✅ All {} metrics meet their targets.",
+                        report.metrics.len()
+                    );
+                } else {
+                    for m in &failures {
+                        let comparator = if m.higher_is_better { ">=" } else { "<=" };
+                        println!(
+                            "❌ {}: {:.3} (target {} {:.2}, n={})",
+                            m.name, m.value, comparator, m.target, m.n
+                        );
+                    }
+                    return Err(anyhow::anyhow!("{} metric(s) below target", failures.len()));
+                }
+                return Ok(());
+            }
+
+            let cfg = AuditConfig {
+                stockfish_path,
+                n_positions,
+                depth,
+                ..Default::default()
+            };
+            println!(
+                "Measuring explainability over {} positions at depth {}...",
+                n_positions, depth
+            );
+            let report = run_audit(&model, &cfg)?;
+
+            println!("\n{}", report.to_markdown());
+            println!(
+                "Evaluated {}/{} sampled positions.",
+                report.n_positions_evaluated, report.n_positions_requested
+            );
+            for m in &report.metrics {
+                if !m.passes() {
+                    println!("⚠️  {} is below target ({:.3}, n={})", m.name, m.value, m.n);
+                }
+            }
+
+            std::fs::write(&out, serde_json::to_string_pretty(&report)?)?;
+            println!("\nReport written to {}", out);
         }
         Commands::Train {
             stockfish_path,
