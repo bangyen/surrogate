@@ -16,6 +16,22 @@ impl SurrogateExplainer {
                 "Gains a **material advantage** ({:+.0} cp)",
             ),
             (
+                "see_best_capture",
+                "Wins material with a **favourable capture** ({:+.0} cp)",
+            ),
+            (
+                "see_worst_threat",
+                "Leaves material exposed to a **capture in reply** ({:+.0} cp)",
+            ),
+            (
+                "hanging_value_us",
+                "Leaves our own pieces **undefended** ({:+.0} cp)",
+            ),
+            (
+                "hanging_value_them",
+                "Leaves opponent pieces **undefended** ({:+.0} cp)",
+            ),
+            (
                 "material_us",
                 "Increases **total material value** ({:+.0} cp)",
             ),

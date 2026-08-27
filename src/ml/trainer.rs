@@ -40,11 +40,56 @@ pub const TARGET_CLIP_CP: f64 = 400.0;
 /// features.  Configurations within this fraction of the best error are
 /// treated as equivalent, and the sparsest among them wins.
 ///
-/// Calibrated by measurement: a 2% tolerance drove the model down to
-/// four coefficients and pushed move-ranking correlation below zero,
-/// which is worse than useless.  Half a percent keeps the preference
-/// without letting it override accuracy.
-pub const SPARSITY_TOLERANCE: f64 = 0.005;
+/// Calibrated by measurement against the centred objective.  Centring
+/// removes the between-position variance that used to dominate the
+/// error, so the residual scale is much smaller and a fraction that
+/// once spanned genuine near-ties no longer reaches them.
+pub const SPARSITY_TOLERANCE: f64 = 0.05;
+
+/// Subtract each position's mean from its own rows.
+///
+/// The surrogate exists to compare the candidate moves available from
+/// one position, which is what both move-ranking and faithfulness
+/// measure.  Fitting raw levels spends most of the model's capacity on
+/// the difference *between* positions -- roughly three quarters of the
+/// target's variance -- an axis those metrics ignore entirely.
+///
+/// Centering per position removes that axis.  The result is still a
+/// linear model, so per-feature attribution is unaffected; contributions
+/// are read as "versus a typical candidate from this position".
+fn center_within_positions(
+    x: &Array2<f64>,
+    y: &Array1<f64>,
+    pos_ids: &[usize],
+) -> (Array2<f64>, Array1<f64>) {
+    use std::collections::HashMap;
+
+    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (row, &pid) in pos_ids.iter().enumerate() {
+        groups.entry(pid).or_default().push(row);
+    }
+
+    let mut xc = x.clone();
+    let mut yc = y.clone();
+
+    for rows in groups.values() {
+        // A lone candidate carries no within-position information; it
+        // centers to zero and drops out of the fit naturally.
+        let n = rows.len() as f64;
+        let y_mean = rows.iter().map(|&r| y[r]).sum::<f64>() / n;
+        for &r in rows {
+            yc[r] = y[r] - y_mean;
+        }
+        for col in 0..x.ncols() {
+            let x_mean = rows.iter().map(|&r| x[[r, col]]).sum::<f64>() / n;
+            for &r in rows {
+                xc[[r, col]] = x[[r, col]] - x_mean;
+            }
+        }
+    }
+
+    (xc, yc)
+}
 
 /// Rows required per feature before a phase gets its own model.
 ///
@@ -151,6 +196,8 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
     let mut set_feature_names = false;
     let mut row_phase: Vec<String> = Vec::new();
     let mut dump_fens: Vec<String> = Vec::new();
+    let mut dump_pos_ids: Vec<usize> = Vec::new();
+    let mut pos_ids: Vec<usize> = Vec::new();
 
     for (i, b) in boards.iter().enumerate() {
         if (i + 1) % 10 == 0 {
@@ -223,6 +270,11 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
                     x_raw.push(row);
                     y_raw.push(clip_target(delta as f64));
                     dump_fens.push(fen_final.clone());
+                    // Which sampled position this row came from: rows are
+                    // dropped when a search fails, so row order alone does
+                    // not identify the group.
+                    dump_pos_ids.push(i);
+                    pos_ids.push(i);
                     // Each position contributes one row per candidate
                     // move, so remember which board each row came from.
                     row_phase.push(classify_phase(b));
@@ -237,9 +289,14 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
 
     // Optional dump for offline analysis of the training set.
     if let Ok(path) = std::env::var("CHESS_AI_DUMP_TRAINING") {
-        if let Ok(json) =
-            serde_json::to_string(&(&x_raw, &y_raw, &feature_names, &row_phase, &dump_fens))
-        {
+        if let Ok(json) = serde_json::to_string(&(
+            &x_raw,
+            &y_raw,
+            &feature_names,
+            &row_phase,
+            &dump_fens,
+            &dump_pos_ids,
+        )) {
             let _ = std::fs::write(&path, json);
             println!("Dumped training data to {}", path);
         }
@@ -256,6 +313,9 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
     let mut scaler = StandardScaler::new(n_features);
     scaler.fit(&x_mat);
     let x_scaled = scaler.transform(&x_mat);
+
+    // Fit within-position differences rather than absolute levels.
+    let (x_scaled, y_vec) = center_within_positions(&x_scaled, &y_vec, &pos_ids);
 
     let mut ensemble = PhaseEnsemble::new(feature_names);
     ensemble.scaler = Some(scaler);
@@ -327,7 +387,9 @@ pub fn train_surrogate_model(engine_path: &str, n_positions: usize) -> Result<Ph
 /// Contiguous folds would otherwise validate against positions closely
 /// related to the ones just trained on.
 fn cross_validate_elastic_net(dataset: &Dataset<f64, f64, ndarray::Ix1>) -> Result<(f64, f64)> {
-    let alphas = [0.01, 0.1, 1.0, 10.0, 30.0, 100.0, 300.0, 1000.0];
+    let alphas = [
+        0.001, 0.01, 0.1, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0, 100.0, 300.0, 1000.0,
+    ];
     // Weighted toward L1: cross-validation optimises squared error alone
     // and will happily pick a dense ridge fit, but an explanation the
     // reader cannot follow has no value here.  See SPARSITY_TOLERANCE.
@@ -457,6 +519,62 @@ mod tests {
         assert_eq!(clip_target(1200.0), TARGET_CLIP_CP);
         assert_eq!(clip_target(-1200.0), -TARGET_CLIP_CP);
         assert!(clip_target(f64::INFINITY).is_finite());
+    }
+
+    #[test]
+    fn test_centering_removes_each_positions_mean() {
+        // Two positions, two candidates each.
+        let x = ndarray::arr2(&[[10.0, 1.0], [20.0, 3.0], [100.0, 5.0], [140.0, 9.0]]);
+        let y = Array1::from(vec![50.0, 70.0, 200.0, 260.0]);
+        let pos_ids = vec![0, 0, 7, 7];
+
+        let (xc, yc) = center_within_positions(&x, &y, &pos_ids);
+
+        // Position 0: means are 15 and 2; position 7: means are 120 and 7.
+        assert_eq!(xc[[0, 0]], -5.0);
+        assert_eq!(xc[[1, 0]], 5.0);
+        assert_eq!(xc[[2, 0]], -20.0);
+        assert_eq!(xc[[3, 0]], 20.0);
+        assert_eq!(yc[0], -10.0);
+        assert_eq!(yc[1], 10.0);
+        assert_eq!(yc[2], -30.0);
+        assert_eq!(yc[3], 30.0);
+
+        // Every group must sum to zero on every column.
+        for group in [[0, 1], [2, 3]] {
+            for col in 0..x.ncols() {
+                let sum: f64 = group.iter().map(|&r| xc[[r, col]]).sum();
+                assert!(sum.abs() < 1e-12, "column {col} did not centre");
+            }
+        }
+    }
+
+    #[test]
+    fn test_centering_zeroes_a_lone_candidate() {
+        // A position with one candidate carries no within-position
+        // information and must not contribute a spurious row.
+        let x = ndarray::arr2(&[[5.0, 9.0]]);
+        let y = Array1::from(vec![42.0]);
+        let (xc, yc) = center_within_positions(&x, &y, &[3]);
+        assert_eq!(xc[[0, 0]], 0.0);
+        assert_eq!(xc[[0, 1]], 0.0);
+        assert_eq!(yc[0], 0.0);
+    }
+
+    #[test]
+    fn test_centering_keeps_rows_grouped_by_position_not_order() {
+        // Rows are dropped when a search fails, so position ids -- not
+        // row order -- define the groups.
+        let x = ndarray::arr2(&[[10.0], [100.0], [20.0]]);
+        let y = Array1::from(vec![0.0, 500.0, 40.0]);
+        // Rows 0 and 2 belong together despite being non-adjacent.
+        let (xc, yc) = center_within_positions(&x, &y, &[1, 9, 1]);
+        assert_eq!(xc[[0, 0]], -5.0);
+        assert_eq!(xc[[2, 0]], 5.0);
+        assert_eq!(yc[0], -20.0);
+        assert_eq!(yc[2], 20.0);
+        // The lone row centres to zero.
+        assert_eq!(yc[1], 0.0);
     }
 
     #[test]
