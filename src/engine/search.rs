@@ -141,11 +141,10 @@ fn score_moves<P: Position>(
     moves
         .iter()
         .map(|m| {
-            let score;
-            if tt_move == Some(m) {
-                score = 30000;
+            let score = if tt_move == Some(m) {
+                30000
             } else if m.is_promotion() {
-                score = 20000;
+                20000
             } else if m.is_capture() {
                 let board = pos.board();
                 let victim = board.piece_at(m.to()).map(|p| p.role).unwrap_or(Role::Pawn);
@@ -154,21 +153,20 @@ fn score_moves<P: Position>(
                     .and_then(|sq| board.piece_at(sq))
                     .map(|p| p.role)
                     .unwrap_or(Role::Pawn);
-                score = 10000 + piece_value(victim) - piece_value(attacker);
+                10000 + piece_value(victim) - piece_value(attacker)
             } else if ctx.ply < MAX_PLY && ctx.killers[ctx.ply][0] == Some(*m) {
-                score = 9000;
+                9000
             } else if ctx.ply < MAX_PLY && ctx.killers[ctx.ply][1] == Some(*m) {
-                score = 8999;
+                8999
             } else {
-                score = m
-                    .from()
+                m.from()
                     .and_then(|sq| pos.board().piece_at(sq))
                     .map(|p| {
                         let pi = piece_index(p.color, p.role);
                         ctx.history[pi][m.to() as usize].min(8998)
                     })
-                    .unwrap_or(0);
-            }
+                    .unwrap_or(0)
+            };
             (score, *m)
         })
         .collect()
@@ -211,7 +209,7 @@ fn quiesce<P: Position + Clone>(pos: &P, mut alpha: i32, beta: i32) -> i32 {
             (score, m)
         })
         .collect();
-    tactical.sort_by(|a, b| b.0.cmp(&a.0));
+    tactical.sort_by_key(|a| std::cmp::Reverse(a.0));
 
     for (_, m) in tactical {
         // Delta pruning: skip captures whose best-case gain cannot
@@ -339,7 +337,7 @@ fn alpha_beta<P: Position + Clone + shakmaty::FromSetup>(
 
     let move_list: Vec<Move> = moves.into_iter().collect();
     let mut scored = score_moves(pos, &move_list, ctx, tt_move.as_ref());
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|a| std::cmp::Reverse(a.0));
 
     let mut best_score = -50000i32;
     let mut best_move: Option<Move> = None;
@@ -351,8 +349,12 @@ fn alpha_beta<P: Position + Clone + shakmaty::FromSetup>(
         let gives_check = new_pos.is_check();
 
         // ── Late Move Reductions (LMR) ──────────────────────────────
-        let score;
-        if i >= 4 && depth >= 3 && !m.is_capture() && !m.is_promotion() && !gives_check && !in_check
+        let score = if i >= 4
+            && depth >= 3
+            && !m.is_capture()
+            && !m.is_promotion()
+            && !gives_check
+            && !in_check
         {
             let reduction: u8 = if depth >= 6 && i >= 8 { 2 } else { 1 };
             let reduced_depth = depth - 1 - reduction;
@@ -363,16 +365,18 @@ fn alpha_beta<P: Position + Clone + shakmaty::FromSetup>(
             if lmr_score > alpha {
                 // Re-search at full depth to verify.
                 ctx.ply += 1;
-                score = -alpha_beta(&new_pos, -beta, -alpha, depth - 1, ctx);
+                let full = -alpha_beta(&new_pos, -beta, -alpha, depth - 1, ctx);
                 ctx.ply -= 1;
+                full
             } else {
-                score = lmr_score;
+                lmr_score
             }
         } else {
             ctx.ply += 1;
-            score = -alpha_beta(&new_pos, -beta, -alpha, depth - 1, ctx);
+            let full = -alpha_beta(&new_pos, -beta, -alpha, depth - 1, ctx);
             ctx.ply -= 1;
-        }
+            full
+        };
 
         if score > best_score {
             best_score = score;
@@ -419,20 +423,19 @@ pub fn find_best_reply_impl<P: Position + Clone + shakmaty::FromSetup>(
     for d in 1..=depth {
         // Aspiration windows: narrow search around the previous score
         // for d >= 2, falling back to a full window on fail.
-        let score;
-        if d <= 1 {
-            score = alpha_beta(pos, -50000, 50000, d, &mut ctx);
+        let score = if d <= 1 {
+            alpha_beta(pos, -50000, 50000, d, &mut ctx)
         } else {
             let a = prev_score - 25;
             let b = prev_score + 25;
             let s = alpha_beta(pos, a, b, d, &mut ctx);
             if s <= a || s >= b {
                 // Window failed -- re-search with full bounds.
-                score = alpha_beta(pos, -50000, 50000, d, &mut ctx);
+                alpha_beta(pos, -50000, 50000, d, &mut ctx)
             } else {
-                score = s;
+                s
             }
-        }
+        };
         prev_score = score;
 
         // Retrieve the best move for the root position from the TT.

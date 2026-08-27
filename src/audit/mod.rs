@@ -266,7 +266,7 @@ pub fn run_audit(model: &PhaseEnsemble, cfg: &AuditConfig) -> Result<AuditReport
         }
 
         let mut sorted = candidates.clone();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
 
         // Evaluate every candidate once and keep the results: the
         // faithfulness metrics below need the top two again, and each
