@@ -45,6 +45,10 @@ metrics-check:
 play:
     {{RUN}} play
 
+# play a chess variant against the native engine
+variant *ARGS:
+    {{RUN}} variant {{ARGS}}
+
 # download syzygy tablebases (3-5 piece)
 syzygy-download dest="~/syzygy":
     {{RUN}} syzygy download --dest {{dest}}

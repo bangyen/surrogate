@@ -11,3 +11,4 @@ pub use engine::see;
 pub use engine::zobrist;
 pub use syzygy::utils as syzygy_utils;
 pub mod syzygy;
+pub mod variant;
