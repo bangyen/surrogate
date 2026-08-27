@@ -120,6 +120,14 @@ impl VariantGame {
         }
     }
 
+    /// Borrow the underlying position.
+    ///
+    /// Callers that only handle standard chess -- the explanation
+    /// pipeline, for instance -- match on this to opt out of variants.
+    pub fn inner(&self) -> &VariantGame {
+        self
+    }
+
     /// Which variant this game is playing.
     pub fn variant(&self) -> Variant {
         match self {

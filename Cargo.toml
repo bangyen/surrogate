@@ -5,30 +5,58 @@ edition = "2021"
 
 [lib]
 name = "chess_ai_rust"
-crate-type = ["rlib"]
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "chess-ai"
 path = "src/main.rs"
+required-features = ["native"]
+
+[features]
+default = ["native"]
+# Everything that needs a filesystem, a subprocess, or a socket.  The
+# wasm build omits these so the pure engine, features and ML inference
+# can compile for the browser.
+native = [
+    "dep:tokio",
+    "dep:axum",
+    "dep:tower-http",
+    "dep:reqwest",
+    "dep:scraper",
+    "dep:tera",
+    "dep:clap",
+    "dep:shakmaty-syzygy",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:linfa",
+    "dep:linfa-elasticnet",
+    "dep:linfa-preprocessing",
+]
+wasm = ["dep:wasm-bindgen", "dep:getrandom"]
 
 [dependencies]
 shakmaty = { version = "0.28.0", features = ["variant"] }
-shakmaty-syzygy = "0.26"
+shakmaty-syzygy = { version = "0.26", optional = true }
 anyhow = "1.0"
 thiserror = "1.0"
-clap = { version = "4.4", features = ["derive"] }
-tokio = { version = "1.32", features = ["full"] }
+clap = { version = "4.4", features = ["derive"] , optional = true }
+tokio = { version = "1.32", features = ["full"] , optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ndarray = { version = "0.16", features = ["serde"] }
-linfa = "0.8.1"
-linfa-elasticnet = "0.8.1"
-linfa-preprocessing = "0.8.1"
+linfa = { version = "0.8.1", optional = true }
+linfa-elasticnet = { version = "0.8.1", optional = true }
+linfa-preprocessing = { version = "0.8.1", optional = true }
 rand = "0.8"
-axum = "0.7"
-tower-http = { version = "0.5", features = ["fs", "cors"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.11", features = ["blocking", "json"] }
-scraper = "0.22"
-tera = "1.19"
+axum = { version = "0.7", optional = true }
+tower-http = { version = "0.5", features = ["fs", "cors"] , optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] , optional = true }
+reqwest = { version = "0.11", features = ["blocking", "json"] , optional = true }
+scraper = { version = "0.22", optional = true }
+tera = { version = "1.19", optional = true }
+
+# Browser build only.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+getrandom = { version = "0.2", features = ["js"], optional = true }
