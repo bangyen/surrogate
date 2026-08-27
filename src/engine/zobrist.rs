@@ -1,4 +1,4 @@
-use shakmaty::{Chess, Color, Position, Role, Square};
+use shakmaty::{Color, Position, Role, Square};
 use std::sync::OnceLock;
 
 /// Maps a (color, role) pair to a 0..11 index for Zobrist table lookup.
@@ -69,7 +69,7 @@ pub fn zobrist_keys() -> &'static ZobristKeys {
 
 /// Compute a full Zobrist hash for a chess position, incorporating
 /// piece placement, side to move, and castling rights.
-pub fn zobrist_hash(pos: &Chess) -> u64 {
+pub fn zobrist_hash<P: Position>(pos: &P) -> u64 {
     let keys = zobrist_keys();
     let board = pos.board();
     let mut hash = 0u64;

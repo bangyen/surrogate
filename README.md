@@ -52,6 +52,10 @@ just audit --fen "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 
 
 # Play interactive chess with explanations
 just play
+
+# Play a variant against the native engine (no Stockfish needed)
+just variant koth
+just variant antichess
 ```
 
 **Web Interface:**
@@ -97,6 +101,34 @@ numbers above are what this code actually produces.
 - **Axum Web Dashboard** — A modern, state-of-the-art web interface for position analysis and interactive gameplay.
 - **Native ML Inference** — High-performance surrogate model implementation using `linfa` and `ndarray`, removing all Python dependencies.
 - **Advanced Positional Analysis** — Sophisticated chess metrics including king safety, mobility, and piece activity.
+- **Chess Variants** — The native engine also plays King of the Hill, Three-Check, and Antichess, each with its own evaluation. Explanations remain standard-chess only.
+
+## Chess Variants
+
+The search and move generation are shared with standard chess — every variant
+implements the same position trait, so the alpha-beta search works unchanged.
+What differs is *evaluation*: each variant wins differently, and reusing the
+standard piece-square tables would produce legal but pointless play.
+
+| Variant | Win condition | Evaluation |
+|---------|---------------|------------|
+| `koth` | March your king to a centre square | Standard eval plus a steep centre-proximity gradient |
+| `3check` | Give check three times | Standard eval plus a term for checks remaining |
+| `antichess` | Lose all your pieces; captures forced | Material inverted — pieces are a liability |
+
+```bash
+just variant --list      # show supported variants
+just variant koth        # play King of the Hill
+```
+
+Atomic, Crazyhouse, Horde and Racing Kings are deliberately not offered: the
+move generator supports them, but this engine has no evaluation for them and
+would play legally while understanding nothing.
+
+**Scope:** variants are engine-only. The ML explanation pipeline trains
+against Stockfish, which plays standard chess exclusively, and the extracted
+features encode standard-chess judgment. Explanations are therefore available
+for standard chess alone.
 
 ## Repo Structure
 

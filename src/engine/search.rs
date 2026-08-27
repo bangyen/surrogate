@@ -111,7 +111,7 @@ impl SearchContext {
 
     /// Bump the history counter for a quiet move that caused a beta
     /// cutoff, aging all counters when they grow too large.
-    pub fn update_history(&mut self, pos: &Chess, m: &Move, depth: u8) {
+    pub fn update_history<P: Position>(&mut self, pos: &P, m: &Move, depth: u8) {
         if let Some(from_sq) = m.from() {
             if let Some(piece) = pos.board().piece_at(from_sq) {
                 let pi = piece_index(piece.color, piece.role);
@@ -132,8 +132,8 @@ impl SearchContext {
 /// Assign a priority score to each legal move so the most promising
 /// moves are searched first.  Ordering: TT move > promotions >
 /// captures (MVV-LVA) > killers > history heuristic.
-fn score_moves(
-    pos: &Chess,
+fn score_moves<P: Position>(
+    pos: &P,
     moves: &[Move],
     ctx: &SearchContext,
     tt_move: Option<&Move>,
@@ -177,7 +177,7 @@ fn score_moves(
 /// Quiescence search with delta pruning: keeps searching tactical
 /// moves (captures / promotions) until the position is quiet, while
 /// pruning captures that cannot possibly raise alpha.
-fn quiesce(pos: &Chess, mut alpha: i32, beta: i32) -> i32 {
+fn quiesce<P: Position + Clone>(pos: &P, mut alpha: i32, beta: i32) -> i32 {
     let stand_pat = evaluate(pos);
     if stand_pat >= beta {
         return beta;
@@ -243,13 +243,38 @@ fn quiesce(pos: &Chess, mut alpha: i32, beta: i32) -> i32 {
 /// Alpha-beta search enhanced with transposition table lookups,
 /// null-move pruning, and late move reductions.  Falls back to
 /// quiescence search at the leaves.
-fn alpha_beta(pos: &Chess, mut alpha: i32, beta: i32, depth: u8, ctx: &mut SearchContext) -> i32 {
+/// Score a finished position from the side to move's perspective.
+///
+/// Variants win by conditions other than checkmate -- reaching the centre
+/// in King of the Hill, running out of pieces in Antichess -- so the
+/// outcome is read from the position rather than assumed to be mate.
+/// Treating a variant win as a draw would make those wins invisible to
+/// the search.
+fn terminal_score<P: Position>(pos: &P, ply: usize) -> i32 {
+    match pos.outcome() {
+        Some(shakmaty::Outcome::Decisive { winner }) => {
+            // Prefer faster wins and slower losses.
+            if winner == pos.turn() {
+                30000 - ply as i32
+            } else {
+                -30000 + ply as i32
+            }
+        }
+        Some(shakmaty::Outcome::Draw) => 0,
+        None => 0,
+    }
+}
+
+fn alpha_beta<P: Position + Clone + shakmaty::FromSetup>(
+    pos: &P,
+    mut alpha: i32,
+    beta: i32,
+    depth: u8,
+    ctx: &mut SearchContext,
+) -> i32 {
     // ── Terminal checks ──────────────────────────────────────────────
     if pos.is_game_over() {
-        if pos.is_checkmate() {
-            return -30000 + ctx.ply as i32;
-        }
-        return 0;
+        return terminal_score(pos, ctx.ply);
     }
     if depth == 0 {
         return quiesce(pos, alpha, beta);
@@ -378,7 +403,10 @@ fn alpha_beta(pos: &Chess, mut alpha: i32, beta: i32, depth: u8, ctx: &mut Searc
 /// Core iterative-deepening search with aspiration windows.  The
 /// transposition table persists across iterations so each deeper
 /// search benefits from earlier results.
-pub fn find_best_reply_impl(pos: &Chess, depth: u8) -> Option<String> {
+pub fn find_best_reply_impl<P: Position + Clone + shakmaty::FromSetup>(
+    pos: &P,
+    depth: u8,
+) -> Option<String> {
     let moves = pos.legal_moves();
     if moves.is_empty() {
         return None;
@@ -438,7 +466,10 @@ pub fn find_best_reply(fen: &str, depth: u8) -> anyhow::Result<Option<String>> {
 
 /// Core forcing-swing calculation: evaluates the largest evaluation
 /// swing obtainable from a forcing move (capture or check).
-pub fn calculate_forcing_swing_impl(pos: &Chess, depth: u8) -> f32 {
+pub fn calculate_forcing_swing_impl<P: Position + Clone + shakmaty::FromSetup>(
+    pos: &P,
+    depth: u8,
+) -> f32 {
     let mut ctx = SearchContext::new();
     let base_eval = alpha_beta(pos, -50000, 50000, depth, &mut ctx);
 

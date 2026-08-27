@@ -1,4 +1,4 @@
-use shakmaty::{Chess, Color, Position, Role, Square};
+use shakmaty::{Color, Position, Role, Square};
 
 /// Material values in centipawns, used throughout the crate for
 /// piece valuation in evaluation, SEE, and move ordering.
@@ -118,7 +118,7 @@ pub fn pst_value(role: Role, sq: Square, color: Color, phase_count: i32) -> i32 
 /// The king PST smoothly blends between middlegame and endgame values
 /// using a continuous phase factor instead of a binary threshold,
 /// giving more accurate positional scores in transitional positions.
-pub fn evaluate(pos: &Chess) -> i32 {
+pub fn evaluate<P: Position>(pos: &P) -> i32 {
     let board = pos.board();
     let phase = count_phase(board);
 
@@ -145,6 +145,101 @@ pub fn evaluate(pos: &Chess) -> i32 {
     }
     if black_bishops >= 2 {
         score -= 30;
+    }
+
+    if pos.turn() == Color::White {
+        score
+    } else {
+        -score
+    }
+}
+
+/// Extra evaluation terms for King of the Hill.
+///
+/// The game is won by walking the king to one of the four centre
+/// squares, so proximity to the centre is worth real material rather
+/// than the liability it represents in standard chess.
+pub fn koth_bonus<P: Position>(pos: &P) -> i32 {
+    let board = pos.board();
+    let mut score = 0i32;
+
+    for color in [Color::White, Color::Black] {
+        let Some(ksq) = board.king_of(color) else {
+            continue;
+        };
+        // Distance to the nearest centre square, in king moves.
+        let file = ksq.file() as i32;
+        let rank = ksq.rank() as i32;
+        let dist = (file - 3).abs().min((file - 4).abs());
+        let dist = dist.max((rank - 3).abs().min((rank - 4).abs()));
+
+        // Reaching the centre wins outright, so the gradient is steep.
+        let bonus = match dist {
+            0 => 2000,
+            1 => 120,
+            2 => 40,
+            _ => 0,
+        };
+        if color == Color::White {
+            score += bonus;
+        } else {
+            score -= bonus;
+        }
+    }
+
+    if pos.turn() == Color::White {
+        score
+    } else {
+        -score
+    }
+}
+
+/// Extra evaluation terms for Three-Check.
+///
+/// Delivering three checks wins, so each check already given is
+/// permanent progress toward the goal.
+pub fn three_check_bonus(remaining_white: u32, remaining_black: u32, turn: Color) -> i32 {
+    // Value rises sharply as the remaining checks run out.
+    let value = |remaining: u32| -> i32 {
+        match remaining {
+            0 => 2000,
+            1 => 250,
+            2 => 80,
+            _ => 0,
+        }
+    };
+
+    // `remaining_white` counts checks White still needs to deliver.
+    let score = value(remaining_white) - value(remaining_black);
+    if turn == Color::White {
+        score
+    } else {
+        -score
+    }
+}
+
+/// Evaluation for Antichess, where the objective is inverted: losing
+/// every piece wins, so material is a liability rather than an asset.
+///
+/// Piece-square tables encode standard-chess judgment and are
+/// meaningless here, so only material counts -- with its sign flipped.
+pub fn evaluate_antichess<P: Position>(pos: &P) -> i32 {
+    let board = pos.board();
+    let mut score = 0i32;
+
+    for sq in Square::ALL {
+        if let Some(piece) = board.piece_at(sq) {
+            // In antichess the king is an ordinary piece.
+            let mat = match piece.role {
+                Role::King => 300,
+                role => piece_value(role),
+            };
+            if piece.color == Color::White {
+                score -= mat;
+            } else {
+                score += mat;
+            }
+        }
     }
 
     if pos.turn() == Color::White {

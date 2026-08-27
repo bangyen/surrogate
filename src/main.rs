@@ -3,6 +3,7 @@ use chess_ai_rust::audit::{run_audit, AuditConfig, AuditReport};
 use chess_ai_rust::engine::ExplainableEngine;
 use chess_ai_rust::features::extract_features;
 use chess_ai_rust::ml::{train_surrogate_model, PhaseEnsemble, SurrogateExplainer};
+use chess_ai_rust::variant::{Variant, VariantGame};
 use clap::{Parser, Subcommand};
 use shakmaty::{Chess, Position};
 use std::io::{self, Write};
@@ -24,6 +25,17 @@ enum Commands {
         stockfish_path: String,
         #[arg(short, long, default_value_t = 12)]
         depth: u32,
+    },
+    /// Play a chess variant against the native engine
+    Variant {
+        /// Which variant to play (standard, koth, 3check, antichess)
+        #[arg(short, long, default_value = "koth")]
+        variant: String,
+        #[arg(short, long, default_value_t = 5)]
+        depth: u8,
+        /// List the supported variants and exit
+        #[arg(short, long)]
+        list: bool,
     },
     /// Run a feature explainability audit
     Audit {
@@ -136,6 +148,68 @@ fn main() -> Result<()> {
                 let best_move = engine.get_best_move(depth)?;
                 println!("Stockfish plays: {}", best_move);
                 engine.make_move(&best_move)?;
+            }
+        }
+        Commands::Variant {
+            variant,
+            depth,
+            list,
+        } => {
+            if list {
+                println!("Supported variants:\n");
+                for v in Variant::ALL {
+                    println!("  {:10} {}", v.slug(), v.description());
+                }
+                println!("\nExplanations are available for standard chess only.");
+                return Ok(());
+            }
+
+            let variant: Variant = variant.parse()?;
+            let mut game = VariantGame::new(variant);
+            println!("Playing {} - {}", variant, variant.description());
+            println!("The native engine plays Black. Enter moves in UCI notation.\n");
+
+            loop {
+                if game.is_game_over() {
+                    println!("Game over.");
+                    break;
+                }
+
+                println!("{}", game.fen());
+                print!("Your move (UCI, or 'quit'): ");
+                io::stdout().flush()?;
+
+                let mut input = String::new();
+                if io::stdin().read_line(&mut input)? == 0 {
+                    break;
+                }
+                let input = input.trim();
+                if input == "quit" || input == "exit" {
+                    break;
+                }
+
+                if let Err(e) = game.play_uci(input) {
+                    println!("Error: {}", e);
+                    continue;
+                }
+
+                if game.is_game_over() {
+                    println!("Game over.");
+                    break;
+                }
+
+                print!("Engine is thinking...");
+                io::stdout().flush()?;
+                match game.best_move(depth) {
+                    Some(mv) => {
+                        game.play_uci(&mv)?;
+                        println!(" plays {} (eval {:+} cp)", mv, game.evaluate());
+                    }
+                    None => {
+                        println!(" no legal moves.");
+                        break;
+                    }
+                }
             }
         }
         Commands::Audit {

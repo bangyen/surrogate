@@ -12,7 +12,7 @@ name = "chess-ai"
 path = "src/main.rs"
 
 [dependencies]
-shakmaty = "0.28.0"
+shakmaty = { version = "0.28.0", features = ["variant"] }
 shakmaty-syzygy = "0.26"
 anyhow = "1.0"
 thiserror = "1.0"
