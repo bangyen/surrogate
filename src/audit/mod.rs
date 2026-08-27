@@ -234,19 +234,27 @@ pub fn run_audit(model: &PhaseEnsemble, cfg: &AuditConfig) -> Result<AuditReport
         let mut sorted = candidates.clone();
         sorted.sort_by(|a, b| b.1.cmp(&a.1));
 
-        // Ranking agreement over every candidate the engine offered.
+        // Evaluate every candidate once and keep the results: the
+        // faithfulness metrics below need the top two again, and each
+        // evaluation costs two more engine searches.
+        let mut evaluated_moves = Vec::new();
         let mut sf_scores = Vec::new();
         let mut sur_scores = Vec::new();
         for (mv, _) in &sorted {
-            if let Some((delta, vec)) =
+            let Some((delta, vec)) =
                 evaluate_move(&mut engine, pos, mv, base_eval, names, cfg.depth)
-            {
-                let scaled = scale(model, &vec);
-                sf_scores.push(delta);
-                sur_scores.push(model.predict(&scaled.view()));
-                t.y_true.push(delta);
-                t.y_pred.push(model.predict(&scaled.view()));
-            }
+            else {
+                evaluated_moves.push(None);
+                continue;
+            };
+
+            let scaled = scale(model, &vec);
+            let prediction = model.predict(&scaled.view());
+            sf_scores.push(delta);
+            sur_scores.push(prediction);
+            t.y_true.push(delta);
+            t.y_pred.push(prediction);
+            evaluated_moves.push(Some((delta, scaled)));
         }
         if sf_scores.len() >= 2 {
             t.taus.push(metrics::kendall_tau(&sf_scores, &sur_scores));
@@ -255,24 +263,18 @@ pub fn run_audit(model: &PhaseEnsemble, cfg: &AuditConfig) -> Result<AuditReport
 
         // Faithfulness, sparsity and coverage compare the top two moves,
         // but only when the engine clearly preferred one of them.
-        let ((best_mv, best_cp), (second_mv, second_cp)) = (&sorted[0], &sorted[1]);
+        let (_, best_cp) = &sorted[0];
+        let (_, second_cp) = &sorted[1];
         if (best_cp - second_cp).abs() < cfg.gap_cp as i32 {
             continue;
         }
 
-        let Some((delta_best, vec_best)) =
-            evaluate_move(&mut engine, pos, best_mv, base_eval, names, cfg.depth)
-        else {
-            continue;
-        };
-        let Some((delta_second, vec_second)) =
-            evaluate_move(&mut engine, pos, second_mv, base_eval, names, cfg.depth)
+        let (Some(Some((delta_best, scaled_best))), Some(Some((delta_second, scaled_second)))) =
+            (evaluated_moves.first(), evaluated_moves.get(1))
         else {
             continue;
         };
 
-        let scaled_best = scale(model, &vec_best);
-        let scaled_second = scale(model, &vec_second);
         let sur_best = model.predict(&scaled_best.view());
         let sur_second = model.predict(&scaled_second.view());
 
@@ -290,7 +292,7 @@ pub fn run_audit(model: &PhaseEnsemble, cfg: &AuditConfig) -> Result<AuditReport
             t.sparsity_counts.push(sp);
         }
 
-        if let Some(coef) = coefficients_for(model, &scaled_best) {
+        if let Some(coef) = coefficients_for(model, scaled_best) {
             t.coverage_total += 1;
             if metrics::is_covered(&coef.to_vec(), &contrib, cfg.weight_threshold) {
                 t.coverage_hits += 1;
