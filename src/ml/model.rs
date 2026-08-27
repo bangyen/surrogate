@@ -42,17 +42,41 @@ impl PhaseEnsemble {
         }
     }
 
+    /// Classify a position's game phase from a **scaled** feature vector.
+    ///
+    /// The thresholds below are piece counts, so the scaled phase value
+    /// is converted back to its raw units first.  Comparing a z-score
+    /// against them directly would put every position in one bucket.
     pub fn get_phase(&self, features: &ArrayView1<f64>) -> String {
         if self.phase_idx == -1 {
             return "middlegame".to_string();
         }
-        let p = features[self.phase_idx as usize];
+        let idx = self.phase_idx as usize;
+        if idx >= features.len() {
+            return "middlegame".to_string();
+        }
+
+        let p = self.unscale_phase(features[idx]);
         if p > 24.0 {
             "opening".to_string()
         } else if p > 12.0 {
             "middlegame".to_string()
         } else {
             "endgame".to_string()
+        }
+    }
+
+    /// Undo the scaler's transform for the phase feature alone.
+    ///
+    /// Returns the value unchanged when the model carries no scaler, in
+    /// which case callers are already working in raw units.
+    fn unscale_phase(&self, scaled: f64) -> f64 {
+        let idx = self.phase_idx as usize;
+        match &self.scaler {
+            Some(s) if idx < s.mean.len() && idx < s.scale.len() => {
+                scaled * s.scale[idx] + s.mean[idx]
+            }
+            _ => scaled,
         }
     }
 
@@ -128,6 +152,53 @@ mod tests {
         assert_eq!(e.get_phase(&array![13.0].view()), "middlegame");
         assert_eq!(e.get_phase(&array![12.0].view()), "endgame");
         assert_eq!(e.get_phase(&array![0.0].view()), "endgame");
+    }
+
+    #[test]
+    fn test_get_phase_unscales_before_comparing() {
+        // Regression guard: callers pass scaled vectors, but the
+        // thresholds are piece counts.  Comparing a z-score directly put
+        // every position in the endgame bucket, making the opening and
+        // middlegame models unreachable.
+        let mut e = PhaseEnsemble::new(vec!["phase".to_string()]);
+        let mut scaler = StandardScaler::new(1);
+        scaler.mean = array![9.393];
+        scaler.scale = array![4.066];
+        e.scaler = Some(scaler);
+
+        let scaled = |raw: f64| (raw - 9.393) / 4.066;
+
+        assert_eq!(e.get_phase(&array![scaled(28.0)].view()), "opening");
+        assert_eq!(e.get_phase(&array![scaled(14.0)].view()), "middlegame");
+        assert_eq!(e.get_phase(&array![scaled(4.0)].view()), "endgame");
+    }
+
+    #[test]
+    fn test_get_phase_without_a_scaler_reads_raw_values() {
+        // No scaler means the caller is already in raw units.
+        let e = PhaseEnsemble::new(vec!["phase".to_string()]);
+        assert_eq!(e.get_phase(&array![28.0].view()), "opening");
+        assert_eq!(e.get_phase(&array![4.0].view()), "endgame");
+    }
+
+    #[test]
+    fn test_phase_ensemble_reaches_every_model() {
+        // With a scaler in play, all three phase models must be selectable.
+        let mut e = PhaseEnsemble::new(vec!["phase".to_string()]);
+        let mut scaler = StandardScaler::new(1);
+        scaler.mean = array![9.393];
+        scaler.scale = array![4.066];
+        e.scaler = Some(scaler);
+
+        for (name, intercept) in [("opening", 1.0), ("middlegame", 2.0), ("endgame", 3.0)] {
+            e.models
+                .insert(name.to_string(), sample_model(array![0.0], intercept));
+        }
+
+        let scaled = |raw: f64| (raw - 9.393) / 4.066;
+        assert_eq!(e.predict(&array![scaled(28.0)].view()), 1.0);
+        assert_eq!(e.predict(&array![scaled(14.0)].view()), 2.0);
+        assert_eq!(e.predict(&array![scaled(4.0)].view()), 3.0);
     }
 
     #[test]
