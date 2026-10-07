@@ -8,7 +8,7 @@ measures how faithful those explanations actually are.
 
 **Runs in a browser** — the engine compiles to WebAssembly and plays entirely
 in the page, with no server and no Stockfish. Build it with `just wasm` and
-serve it with `just demo`.
+serve it with `just demo`. [Run the browser demo locally](docs/BROWSER_DEMO.md).
 
 <p align="center">
   <img src="docs/audit-demo.gif" alt="Demo preview" width="600">
@@ -52,7 +52,7 @@ build. [Full results and methodology ↓](#results)
 
 ### Prerequisites
 
-- [Rust 1.75+](https://rustup.rs/)
+- [Rust (the version pinned in `rust-toolchain.toml`)](https://rustup.rs/)
 - [Just](https://github.com/casey/just) (optional, but recommended)
 - [Stockfish Engine](https://stockfishchess.org/) (installed and in PATH, or set `STOCKFISH_PATH`)
 
@@ -60,7 +60,7 @@ build. [Full results and methodology ↓](#results)
 
 ```bash
 git clone https://github.com/bangyen/surrogate.git
-cd chess
+cd surrogate
 just build
 ```
 
@@ -101,7 +101,7 @@ just variant antichess
 just web
 # Then open http://localhost:5000
 
-# ...or build the browser demo, which needs nothing but a browser
+# ...or build the browser demo (requires wasm-pack; see the setup link above)
 just wasm
 just demo
 ```
@@ -212,7 +212,7 @@ for standard chess alone.
 ## Repo Structure
 
 ```plaintext
-chess/
+surrogate/
 ├── src/
 │   ├── engine/       # Native alpha-beta search, evaluation, SEE, Zobrist
 │   │                 #   hashing, plus the Stockfish UCI interface
